@@ -24,13 +24,12 @@ const Registers = struct {
     y: u8,
 };
 
-const CPU = struct {
+const Context = struct {
     registers: Registers,
-    // flags: Flags,
-    memory: [0x10000]u8,
+    memory: []u8,
 
-    pub fn powerOn() CPU {
-        return CPU{
+    pub fn init() Context {
+        return Context{
             .registers = Registers{
                 .pc = 0,
                 .sp = 0xFD,
@@ -92,22 +91,38 @@ const instructions = [_]u8{
     "BEQ rel",  "SBC ind,Y", "---",   "---", "---",       "SBC zpg,X", "INC zpg,X", "---", "SED impl", "SBC abs,Y", "---",      "---", "---",       "SBC abs,X", "INC abs,X", "---", // F0
 };
 
-const addressModes = enum {
+const AddressMode = enum {
     // Non-indexed, non-memory
-    Accumulator, // OPC A
-    Immediate, // OPC #$BB
-    Implied, // OPC
+    Accumulator,
+    Immediate,
+    Implied,
     // Non-indexed, memory
     Relative,
     Absolute,
     ZeroPage,
     Indirect,
     // Indexed, memory
-    AbsoluteIndexed,
-    ZeroPageIndexed,
+    AbsoluteX,
+    AbsoluteY,
+    ZeroPageX,
+    ZeroPageY,
     IndexedIndirect,
     IndirectIndexed,
+
+    pub fn load(mode: AddressMode, context: Context) ![]u8 {
+        const val = switch (mode) {
+            Accumulator => context.registers.a,
+            Immediate => context.memory[context.registers.pc + 1],
+            Relative => context.registers.pc + @bitCast(i8, context.memory[context.registers.pc + 1]),
+            Absolute => context.memory[context.memory[context.registers.pc + 1] + context.memory[context.registers.pc + 2]],
+            ZeroPage => context.memory[context.memory[context.registers.pc + 1]],
+
+            Implied => 0xff,
+        };
+    }
 };
+
+const modes = [_]addressModes{};
 
 pub fn main() !void {
     a = std.heap.c_allocator;
@@ -124,12 +139,11 @@ pub fn main() !void {
     defer a.free(bin);
 
     var i: usize = 0x0400;
-    while (i < bin.len - 1) : (i += 2) {
-        const hi = bin[i];
-        const lo = bin[i + 1];
+    while (i < 0x3399) : (i += 1) {
+        const opc = bin[i];
 
-        std.debug.warn("{x:2} {x:2}\n", .{ hi, lo });
+        std.debug.warn("{x:2}\n", .{opc});
     }
 
-    var cpu = CPU.powerOn();
+    var context = Context.init();
 }

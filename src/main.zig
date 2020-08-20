@@ -20,22 +20,26 @@ const StatusRegister = packed union {
     },
 };
 
-const Registers = struct {
-    pc: u16,
-    sp: u8,
-    p: StatusRegister,
-    a: u8,
-    x: u8,
-    y: u8,
-};
+const CPU = struct {
+    // Registers
+    registers: struct {
+        pc: u16,
+        sp: u8,
+        p: StatusRegister,
+        a: u8,
+        x: u8,
+        y: u8,
+    },
 
-const Context = struct {
-    registers: Registers,
-    memory: []u8,
+    pins: struct {
+        a: u16,
+        d: u8,
+        rw: bool,
+    },
 
-    pub fn init() Context {
-        return Context{
-            .registers = Registers{
+    pub fn init() CPU {
+        return CPU{
+            .registers = .{
                 .pc = 0,
                 .sp = 0xFD,
                 .p = .{ .p = 0x34 },
@@ -43,7 +47,11 @@ const Context = struct {
                 .x = 0,
                 .y = 0,
             },
-            .memory = [_]u8{0} ** 0x10000,
+            .pins = .{
+                .rw = true,
+                .a = 0,
+                .d = 0,
+            },
         };
     }
 };
@@ -139,16 +147,16 @@ const AddressMode = union(enum) {
     IndexedIndirect: u8,
     IndirectIndexed: u8,
 
-    pub fn load(self: AddressMode, context: Context) ![]u8 {
-        const val = switch (self) {
-            .Accumulator => context.registers.a,
-            .Immediate => context.memory[context.registers.pc + 1],
-            .Relative => context.registers.pc + @bitCast(i8, context.memory[context.registers.pc + 1]),
-            .Absolute => context.memory[context.memory[context.registers.pc + 1] + context.memory[context.registers.pc + 2]],
-            .ZeroPage => context.memory[context.memory[context.registers.pc + 1]],
-            else => 0x00,
-        };
-    }
+    // pub fn load(self: AddressMode, cpu: CPU) ![]u8 {
+    //     const val = switch (self) {
+    //         .Accumulator => context.registers.a,
+    //         .Immediate => context.memory[context.registers.pc + 1],
+    //         .Relative => context.registers.pc + @bitCast(i8, context.memory[context.registers.pc + 1]),
+    //         .Absolute => context.memory[context.memory[context.registers.pc + 1] + context.memory[context.registers.pc + 2]],
+    //         .ZeroPage => context.memory[context.memory[context.registers.pc + 1]],
+    //         else => 0x00,
+    //     };
+    // }
 
     pub fn size(self: AddressMode) u32 {
         return switch (self) {
@@ -173,9 +181,9 @@ const Instruction = struct {
     type: InstructionType,
     mode: AddressMode,
 
-    pub fn exec(self: Instruction, context: *Context) !void {
+    pub fn exec(self: Instruction, cpu: *CPU) !void {
         _ = switch (self.type) {
-            .CLD => context.*.registers.p.flags.d = false,
+            .CLD => cpu.*.registers.p.flags.d = false,
             else => .{},
         };
 
@@ -342,6 +350,28 @@ pub fn decode(opcode: u8, lo: u8, hi: u8) !Instruction {
     };
 }
 
+const Context = struct {
+    cpu: CPU,
+    memory: []u8,
+
+    pub fn init() !Context {
+        return Context{
+            .cpu = CPU.init(),
+            .memory = try a.alloc(u8, 0x10000),
+        };
+    }
+
+    pub fn tick(self: Context, cpu: *CPU) void {
+        const addr = cpu.*.pins.a;
+
+        if (cpu.*.pins.rw) {
+            cpu.*.pins.d = self.memory[addr];
+        } else {
+            self.memory[addr] = cpu.*.pins.d;
+        }
+    }
+};
+
 pub fn main() !void {
     a = std.heap.c_allocator;
 
@@ -351,12 +381,15 @@ pub fn main() !void {
     const bin_path = try args.next(a) orelse {
         return error.InvalidArgs;
     };
-    defer a.free(bin_path);
+    errdefer a.free(bin_path);
 
-    const bin = try (fs.cwd().readFileAlloc(a, bin_path, 1024 * 100));
-    defer a.free(bin);
+    const file = try (fs.cwd().openFile(bin_path, .{}));
+    a.free(bin_path);
 
-    var context = Context.init();
+    const context = try Context.init();
+    defer a.free(context.memory);
+
+    _ = try (file.readAll(context.memory));
 
     // TODO: Figure out why the code segment starts here and not at 0x0400
     var i: usize = 0x03F6;

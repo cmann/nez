@@ -59,10 +59,8 @@ const CPU = struct {
 
     pub fn step(self: CPU) !void {
         // Cycle 1
-        const opcode = self.pins.d;
+        const opcode = self.fetch();
         const instruction = try decode(opcode);
-        self.registers.pc += 1;
-        self.pins.a = self.registers.pc;
         // call tick
 
         instruction.exec();
@@ -85,20 +83,20 @@ const CPU = struct {
     }
 
     pub fn indexedIndirect(self: CPU, instruction: Instruction) void {
-        const addr = self.fetchByte();
-        self.pins.a = addr;
+        const addr = self.fetch();
         // call tick
 
-        const b = self.pins.d + self.registers.x;
-        self.pins.a = b;
+        self.pins.a += self.registers.x;
+        self.pins.a |= 0xFF;
         // call tick
 
         const lo = self.pins.d;
-        self.pins.a = b + 1;
+        self.pins.a += 1;
+        self.pins.a |= 0xFF;
         // call tick
 
         const hi = self.pins.d;
-        self.pins.a = @as(u16, hi) << 8 | @as(u16, lo);
+        self.pins.a = word(lo, hi);
         if (instruction.access == .W) {
             self.pins.rw = false;
             self.pins.d = instruction.write();
@@ -108,6 +106,8 @@ const CPU = struct {
         if (instruction.access == .R) {
             instruction.read(self.pins.d);
         }
+        self.pins.a = self.registers.PC;
+        // sync pin?
         // call tick
     }
 };
@@ -260,9 +260,10 @@ const AddressMode = enum {
 const Instruction = struct {
     type: InstructionType,
     mode: AddressMode,
-    access: MemoryAccess,
 
-    pub fn exec(self: Instruction) void {}
+    pub fn exec(self: Instruction) void {
+        self.mode.exec(self.type);
+    }
 };
 
 pub fn decode(opcode: u8) !Instruction {
@@ -477,4 +478,8 @@ pub fn main() !void {
         try instruction.exec(&context);
         break;
     }
+}
+
+pub fn word(lo: u8, hi: u8) u16 {
+    return @as(u16, hi) << 8 | @as(u16, lo);
 }

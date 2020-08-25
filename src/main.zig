@@ -20,6 +20,13 @@ const StatusRegister = packed union {
     },
 };
 
+const Pins = struct {
+    a: u16,
+    d: u8,
+    rw: bool,
+    sync: bool,
+};
+
 fn CPU(comptime T: type) type {
     return struct {
         // Registers
@@ -32,18 +39,11 @@ fn CPU(comptime T: type) type {
             y: u8,
         },
 
-        pins: struct {
-            a: u16,
-            d: u8,
-            rw: bool,
-            sync: bool,
-        },
+        pins: Pins,
 
         context: T,
 
-        callback: fn (T, CPU(T)) void,
-
-        pub fn init() CPU(T) {
+        pub fn init(context: T) CPU(T) {
             return CPU(T){
                 .registers = .{
                     .pc = 0,
@@ -59,36 +59,40 @@ fn CPU(comptime T: type) type {
                     .a = 0,
                     .d = 0,
                 },
+                .context = context,
             };
         }
 
-        pub fn step(self: CPU(T)) !void {
-            // Cycle 1
+        pub fn step(self: *CPU(T)) !void {
             const opcode = self.fetch();
             const instruction = try decode(opcode);
-            // call tick
+            self.tick();
 
-            instruction.exec();
+            // instruction.exec();
         }
 
-        pub fn fetch(self: CPU(T), mode: MemoryAccess) u8 {
-            self.register.pc += 1;
-            self.pins.a = self.register.pc;
+        pub fn tick(self: CPU(T)) void {
+            self.pins = self.context.tick(self.pins);
+        }
+
+        pub fn fetch(self: *CPU(T)) u8 {
+            self.registers.pc += 1;
+            self.pins.a = self.registers.pc;
             return self.pins.d;
         }
 
         pub fn indexedIndirect(self: CPU(T), instruction: Instruction) void {
             const addr = self.fetch();
-            // call tick
+            self.tick();
 
             self.pins.a += self.registers.x;
             self.pins.a |= 0xFF;
-            // call tick
+            self.tick();
 
             const lo = self.pins.d;
             self.pins.a += 1;
             self.pins.a |= 0xFF;
-            // call tick
+            self.tick();
 
             const hi = self.pins.d;
             self.pins.a = word(lo, hi);
@@ -96,14 +100,14 @@ fn CPU(comptime T: type) type {
                 self.pins.rw = false;
                 self.pins.d = instruction.write(self);
             }
-            // call tick
+            self.tick();
 
             if (instruction.access == .R) {
                 instruction.read(self);
             }
             self.pins.a = self.registers.PC;
             // sync pin?
-            // call tick
+            self.tick();
         }
 
         pub fn setNZ(self: CPU(T), result: u8) void {
@@ -237,15 +241,18 @@ const Context = struct {
         };
     }
 
-    // pub fn tick(self: Context, cpu: CPU) void {
-    //     const addr = cpu.pins.a;
+    pub fn tick(self: Context, cur: Pins) Pins {
+        const addr = cur.a;
+        var next = cur;
 
-    //     if (cpu.pins.rw) {
-    //         cpu.pins.d = self.memory[addr];
-    //     } else {
-    //         self.memory[addr] = cpu.pins.d;
-    //     }
-    // }
+        if (cur.rw) {
+            next.d = self.memory[addr];
+        } else {
+            self.memory[addr] = cur.d;
+        }
+
+        return next;
+    }
 };
 
 pub fn main() !void {
@@ -267,8 +274,8 @@ pub fn main() !void {
 
     _ = try file.readAll(context.memory);
 
-    var cpu = CPU(Context).init();
-    cpu.context = context;
+    var cpu = CPU(Context).init(context);
+    _ = try cpu.step();
 
     // TODO: Figure out why the code segment starts here and not at 0x0400
     cpu.registers.pc = 0x03F6;

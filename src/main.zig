@@ -71,7 +71,7 @@ fn CPU(comptime T: type) type {
             // instruction.exec();
         }
 
-        pub fn tick(self: CPU(T)) void {
+        pub fn tick(self: *CPU(T)) void {
             self.pins = self.context.tick(self.pins);
         }
 

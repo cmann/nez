@@ -100,6 +100,35 @@ fn CPU(comptime T: type) type {
             self.registers.p.flags = flags;
         }
 
+        fn zeroPage(self: *CPU(T), instruction: Instruction) void {
+            const addr = self.fetch();
+
+            switch (instruction) {
+                .R => |r| {
+                    self.tick();
+                    r(self, self.pins.d);
+                },
+                .W => |w| {
+                    self.pins.rw = false;
+                    self.pins.d = w(self);
+                    self.tick();
+                },
+                .RW => |rw| {
+                    const val = self.pins.d;
+                    self.pins.rw = false;
+                    self.tick();
+
+                    self.pins.d = rw(self, val);
+                    self.tick();
+
+                    self.pins.rw = true;
+                },
+            }
+
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
         fn indexedIndirect(self: *CPU(T), instruction: Instruction) void {
             const addr = self.fetch();
             self.tick();
@@ -156,20 +185,50 @@ fn CPU(comptime T: type) type {
             self.setNZ(self.registers.a);
         }
 
+        fn asl(self: *CPU(T), value: u8) u8 {
+            self.registers.p.flags.c = value & 0x80 > 0;
+            const result = value << 1;
+            self.setNZ(result);
+            return result;
+        }
+
+        fn asla(self: *CPU(T)) void {
+            self.registers.p.flags.c = self.registers.a & 0x80 > 0;
+            self.registers.a <<= 1;
+            self.setNZ(self.registers.a);
+        }
+
         fn cld(self: *CPU(T)) void {
             self.registers.p.flags.d = false;
         }
 
-        fn cmp(self: *CPU(T)) void {}
+        fn cmp(self: *CPU(T), value: u8) void {
+            const diff: u16 = self.registers.a - value;
+            self.setNZ(@truncate(u8, diff));
+            self.registers.p.flags.c = diff & 0xFF00 == 0;
+        }
 
         fn eor(self: *CPU(T), value: u8) void {
             self.registers.a ^= value;
             self.setNZ(self.registers.a);
         }
 
+        fn lda(self: *CPU(T), value: u8) void {
+            self.registers.a = value;
+            self.setNZ(self.registers.a);
+        }
+
         fn ora(self: *CPU(T), value: u8) void {
             self.registers.a |= value;
             self.setNZ(self.registers.a);
+        }
+
+        fn sbc(self: *CPU(T), value: u8) void {
+            const carry = @as(u16, if (self.registers.p.flags.c) 1 else 0);
+            const diff = self.registers.a - value - carry;
+            self.registers.p.flags.v = (self.registers.a ^ value) & (self.registers.a ^ diff) & 0x80 > 0;
+            self.registers.p.flags.c = diff & 0xFF00 == 0;
+            self.registers.a = @truncate(u8, diff);
         }
 
         fn sta(self: *CPU(T)) u8 {
@@ -180,11 +239,11 @@ fn CPU(comptime T: type) type {
             return switch (opcode) {
                 // 0x00 => self.implied(Instruction{ .R = CPU(T).brk }),
                 0x01 => self.indexedIndirect(Instruction{ .R = CPU(T).ora }),
-                // 0x05 => self.zeroPage(Instruction{ .R = CPU(T).ora }),
-                // 0x06 => self.zeroPage(Instruction{ .R = CPU(T).asl }),
+                0x05 => self.zeroPage(Instruction{ .R = CPU(T).ora }),
+                0x06 => self.zeroPage(Instruction{ .RW = CPU(T).asl }),
                 // 0x08 => self.implied(Instruction{ .W = CPU(T).php }),
                 // 0x09 => self.immediate(Instruction{ .R = CPU(T).ora }),
-                // 0x0A => self.accumulator(Instruction{ .RW = CPU(T).asl }),
+                // 0x0A => self.accumulator(Instruction{ .R = CPU(T).asla }),
                 // 0x0D => self.absolute(Instruction{ .R = CPU(T).ora }),
                 // 0x0E => self.absolute(Instruction{ .RW = CPU(T).asl }),
                 // 0x10 => self.relative(Instruction{ .R = CPU(T).bpl }),
@@ -269,7 +328,7 @@ fn CPU(comptime T: type) type {
                 // 0x9A => self.implied(Instruction{ .R = CPU(T).txs }),
                 // 0x9D => self.absoluteX(Instruction{ .W = CPU(T).sta }),
                 // 0xA0 => self.immediate(Instruction{ .R = CPU(T).ldy }),
-                // 0xA1 => self.indexedIndirect(Instruction{ .R = CPU(T).lda }),
+                0xA1 => self.indexedIndirect(Instruction{ .R = CPU(T).lda }),
                 // 0xA2 => self.immediate(Instruction{ .R = CPU(T).ldx }),
                 // 0xA4 => self.zeroPage(Instruction{ .R = CPU(T).ldy }),
                 // 0xA5 => self.zeroPage(Instruction{ .R = CPU(T).lda }),
@@ -311,7 +370,7 @@ fn CPU(comptime T: type) type {
                 // 0xDD => self.absoluteX(Instruction{ .R = CPU(T).cmp }),
                 // 0xDE => self.absoluteX(Instruction{ .RW = CPU(T).dec }),
                 // 0xE0 => self.immediate(Instruction{ .R = CPU(T).cpx }),
-                // 0xE1 => self.indexedIndirect(Instruction{ .R = CPU(T).sbc }),
+                0xE1 => self.indexedIndirect(Instruction{ .R = CPU(T).sbc }),
                 // 0xE4 => self.zeroPage(Instruction{ .R = CPU(T).cpx }),
                 // 0xE5 => self.zeroPage(Instruction{ .R = CPU(T).sbc }),
                 // 0xE6 => self.zeroPage(Instruction{ .RW = CPU(T).inc }),

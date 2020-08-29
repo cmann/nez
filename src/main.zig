@@ -20,6 +20,15 @@ const StatusRegister = packed union {
     },
 };
 
+const Registers = struct {
+    pc: u16,
+    sp: u8,
+    p: StatusRegister,
+    a: u8,
+    x: u8,
+    y: u8,
+};
+
 const Pins = struct {
     a: u16,
     d: u8,
@@ -29,19 +38,9 @@ const Pins = struct {
 
 fn CPU(comptime T: type) type {
     return struct {
-        // Registers
-        registers: struct {
-            pc: u16,
-            sp: u8,
-            p: StatusRegister,
-            a: u8,
-            x: u8,
-            y: u8,
-        },
-
-        pins: Pins,
-
         context: T,
+        registers: Registers,
+        pins: Pins,
 
         const Instruction = union(enum) {
             R: fn (*CPU(T), u8) void,
@@ -100,8 +99,28 @@ fn CPU(comptime T: type) type {
             self.registers.p.flags = flags;
         }
 
+        fn implied(self: *CPU(T), instruction: fn (*CPU(T)) void) void {
+            instruction(self);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
+        fn accumulator(self: *CPU(T), instruction: fn (*CPU(T), u8) u8) void {
+            self.registers.a = instruction(self, self.registers.a);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
+        fn immediate(self: *CPU(T), instruction: fn (*CPU(T), u8) void) void {
+            const value = self.fetch();
+            instruction(self, value);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
         fn zeroPage(self: *CPU(T), instruction: Instruction) void {
             const addr = self.fetch();
+            self.pins.a = addr;
 
             switch (instruction) {
                 .R => |r| {
@@ -192,12 +211,6 @@ fn CPU(comptime T: type) type {
             return result;
         }
 
-        fn asla(self: *CPU(T)) void {
-            self.registers.p.flags.c = self.registers.a & 0x80 > 0;
-            self.registers.a <<= 1;
-            self.setNZ(self.registers.a);
-        }
-
         fn cld(self: *CPU(T)) void {
             self.registers.p.flags.d = false;
         }
@@ -223,6 +236,24 @@ fn CPU(comptime T: type) type {
             self.setNZ(self.registers.a);
         }
 
+        fn rol(self: *CPU(T), value: u8) u8 {
+            const carry: u8 = if (self.registers.p.flags.c) 1 else 0;
+            self.registers.p.flags.c = value & 0x80 > 0;
+            var result = value << 1;
+            result |= carry;
+            self.setNZ(result);
+            return result;
+        }
+
+        fn ror(self: *CPU(T), value: u8) u8 {
+            const carry: u8 = if (self.registers.p.flags.c) 1 << 7 else 0;
+            self.registers.p.flags.c = value & 1 > 0;
+            var result = value >> 1;
+            result |= carry;
+            self.setNZ(result);
+            return result;
+        }
+
         fn sbc(self: *CPU(T), value: u8) void {
             const carry = @as(u16, if (self.registers.p.flags.c) 1 else 0);
             const diff = self.registers.a - value - carry;
@@ -242,8 +273,8 @@ fn CPU(comptime T: type) type {
                 0x05 => self.zeroPage(Instruction{ .R = CPU(T).ora }),
                 0x06 => self.zeroPage(Instruction{ .RW = CPU(T).asl }),
                 // 0x08 => self.implied(Instruction{ .W = CPU(T).php }),
-                // 0x09 => self.immediate(Instruction{ .R = CPU(T).ora }),
-                // 0x0A => self.accumulator(Instruction{ .R = CPU(T).asla }),
+                0x09 => self.immediate(CPU(T).ora),
+                0x0A => self.accumulator(CPU(T).asl),
                 // 0x0D => self.absolute(Instruction{ .R = CPU(T).ora }),
                 // 0x0E => self.absolute(Instruction{ .RW = CPU(T).asl }),
                 // 0x10 => self.relative(Instruction{ .R = CPU(T).bpl }),
@@ -257,11 +288,11 @@ fn CPU(comptime T: type) type {
                 // 0x20 => self.absolute(Instruction{ .RW = CPU(T).jsr }),
                 0x21 => self.indexedIndirect(Instruction{ .R = CPU(T).anda }),
                 // 0x24 => self.zeroPage(Instruction{ .R = CPU(T).bit }),
-                // 0x25 => self.zeroPage(Instruction{ .R = CPU(T).and }),
-                // 0x26 => self.zeroPage(Instruction{ .RW = CPU(T).rol }),
+                0x25 => self.zeroPage(Instruction{ .R = CPU(T).anda }),
+                0x26 => self.zeroPage(Instruction{ .RW = CPU(T).rol }),
                 // 0x28 => self.implied(Instruction{ .R = CPU(T).plp }),
                 // 0x29 => self.absoluteY(Instruction{ .R = CPU(T).and }),
-                // 0x2A => self.accumulator(Instruction{ .RW = CPU(T).rol }),
+                0x2A => self.accumulator(CPU(T).rol),
                 // 0x2C => self.absolute(Instruction{ .R = CPU(T).bit }),
                 // 0x2D => self.absolute(Instruction{ .R = CPU(T).and }),
                 // 0x2E => self.absolute(Instruction{ .RW = CPU(T).rol }),
@@ -275,10 +306,10 @@ fn CPU(comptime T: type) type {
                 // 0x3E => self.absoluteX(Instruction{ .RW = CPU(T).rol }),
                 // 0x40 => self.implied(Instruction{ .R = CPU(T).rti }),
                 0x41 => self.indexedIndirect(Instruction{ .R = CPU(T).eor }),
-                // 0x45 => self.zeroPage(Instruction{ .R = CPU(T).eor }),
+                0x45 => self.zeroPage(Instruction{ .R = CPU(T).eor }),
                 // 0x46 => self.zeroPage(Instruction{ .RW = CPU(T).lsr }),
                 // 0x48 => self.implied(Instruction{ .W = CPU(T).pha }),
-                // 0x49 => self.immediate(Instruction{ .R = CPU(T).eor }),
+                0x49 => self.immediate(CPU(T).eor),
                 // 0x4A => self.accumulator(Instruction{ .RW = CPU(T).lsr }),
                 // 0x4C => self.absolute(Instruction{ .R = CPU(T).jmp }),
                 // 0x4D => self.absolute(Instruction{ .R = CPU(T).eor }),
@@ -293,11 +324,11 @@ fn CPU(comptime T: type) type {
                 // 0x5E => self.absoluteX(Instruction{ .RW = CPU(T).lsr }),
                 // 0x60 => self.implied(Instruction{ .R = CPU(T).rts }),
                 0x61 => self.indexedIndirect(Instruction{ .R = CPU(T).adc }),
-                // 0x65 => self.zeroPage(Instruction{ .R = CPU(T).adc }),
+                0x65 => self.zeroPage(Instruction{ .R = CPU(T).adc }),
                 // 0x66 => self.zeroPage(Instruction{ .RW = CPU(T).ror }),
                 // 0x68 => self.implied(Instruction{ .R = CPU(T).pla }),
-                // 0x69 => self.immediate(Instruction{ .R = CPU(T).adc }),
-                // 0x6A => self.accumulator(Instruction{ .RW = CPU(T).ror }),
+                0x69 => self.immediate(CPU(T).adc),
+                0x6A => self.accumulator(CPU(T).ror),
                 // 0x6C => self.indirect(Instruction{ .R = CPU(T).jmp }),
                 // 0x6D => self.absolute(Instruction{ .R = CPU(T).adc }),
                 // 0x6E => self.absolute(Instruction{ .RW = CPU(T).ror }),
@@ -311,7 +342,7 @@ fn CPU(comptime T: type) type {
                 // 0x7E => self.absoluteX(Instruction{ .RW = CPU(T).ror }),
                 0x81 => self.indexedIndirect(Instruction{ .W = CPU(T).sta }),
                 // 0x84 => self.zeroPage(Instruction{ .W = CPU(T).sty }),
-                // 0x85 => self.zeroPage(Instruction{ .W = CPU(T).sta }),
+                0x85 => self.zeroPage(Instruction{ .W = CPU(T).sta }),
                 // 0x86 => self.zeroPage(Instruction{ .W = CPU(T).stx }),
                 // 0x88 => self.implied(Instruction{ .R = CPU(T).dey }),
                 // 0x8A => self.implied(Instruction{ .R = CPU(T).txa }),
@@ -327,14 +358,14 @@ fn CPU(comptime T: type) type {
                 // 0x99 => self.absoluteY(Instruction{ .W = CPU(T).sta }),
                 // 0x9A => self.implied(Instruction{ .R = CPU(T).txs }),
                 // 0x9D => self.absoluteX(Instruction{ .W = CPU(T).sta }),
-                // 0xA0 => self.immediate(Instruction{ .R = CPU(T).ldy }),
+                // 0xA0 => self.immediate(CPU(T).ldy),
                 0xA1 => self.indexedIndirect(Instruction{ .R = CPU(T).lda }),
-                // 0xA2 => self.immediate(Instruction{ .R = CPU(T).ldx }),
+                // 0xA2 => self.immediate(CPU(T).ldx),
                 // 0xA4 => self.zeroPage(Instruction{ .R = CPU(T).ldy }),
-                // 0xA5 => self.zeroPage(Instruction{ .R = CPU(T).lda }),
+                0xA5 => self.zeroPage(Instruction{ .R = CPU(T).lda }),
                 // 0xA6 => self.zeroPage(Instruction{ .R = CPU(T).ldx }),
                 // 0xA8 => self.implied(Instruction{ .R = CPU(T).tay }),
-                // 0xA9 => self.immediate(Instruction{ .R = CPU(T).lda }),
+                0xA9 => self.immediate(CPU(T).lda),
                 // 0xAA => self.implied(Instruction{ .R = CPU(T).tax }),
                 // 0xAC => self.absolute(Instruction{ .R = CPU(T).ldy }),
                 // 0xAD => self.absolute(Instruction{ .R = CPU(T).lda }),
@@ -350,13 +381,13 @@ fn CPU(comptime T: type) type {
                 // 0xBC => self.absoluteX(Instruction{ .R = CPU(T).ldy }),
                 // 0xBD => self.absoluteX(Instruction{ .R = CPU(T).lda }),
                 // 0xBE => self.absoluteY(Instruction{ .R = CPU(T).ldx }),
-                // 0xC0 => self.immediate(Instruction{ .R = CPU(T).cpy }),
+                // 0xC0 => self.immediate(CPU(T).cpy),
                 0xC1 => self.indexedIndirect(Instruction{ .R = CPU(T).cmp }),
                 // 0xC4 => self.zeroPage(Instruction{ .R = CPU(T).cpy }),
-                // 0xC5 => self.zeroPage(Instruction{ .R = CPU(T).cmp }),
+                0xC5 => self.zeroPage(Instruction{ .R = CPU(T).cmp }),
                 // 0xC6 => self.zeroPage(Instruction{ .RW = CPU(T).dec }),
                 // 0xC8 => self.implied(Instruction{ .R = CPU(T).iny }),
-                // 0xC9 => self.immediate(Instruction{ .R = CPU(T).cmp }),
+                0xC9 => self.immediate(CPU(T).cmp),
                 // 0xCA => self.implied(Instruction{ .R = CPU(T).dex }),
                 // 0xCC => self.absolute(Instruction{ .R = CPU(T).cpy }),
                 // 0xCD => self.absolute(Instruction{ .R = CPU(T).cmp }),
@@ -369,13 +400,13 @@ fn CPU(comptime T: type) type {
                 // 0xD9 => self.absoluteY(Instruction{ .R = CPU(T).cmp }),
                 // 0xDD => self.absoluteX(Instruction{ .R = CPU(T).cmp }),
                 // 0xDE => self.absoluteX(Instruction{ .RW = CPU(T).dec }),
-                // 0xE0 => self.immediate(Instruction{ .R = CPU(T).cpx }),
+                // 0xE0 => self.immediate(CPU(T).cpx),
                 0xE1 => self.indexedIndirect(Instruction{ .R = CPU(T).sbc }),
                 // 0xE4 => self.zeroPage(Instruction{ .R = CPU(T).cpx }),
-                // 0xE5 => self.zeroPage(Instruction{ .R = CPU(T).sbc }),
+                0xE5 => self.zeroPage(Instruction{ .R = CPU(T).sbc }),
                 // 0xE6 => self.zeroPage(Instruction{ .RW = CPU(T).inc }),
                 // 0xE8 => self.implied(Instruction{ .R = CPU(T).inx }),
-                // 0xE9 => self.immediate(Instruction{ .R = CPU(T).sbc }),
+                0xE9 => self.immediate(CPU(T).sbc),
                 // 0xEA => self.implied(Instruction{ .R = CPU(T).nop }),
                 // 0xEC => self.absolute(Instruction{ .R = CPU(T).cpx }),
                 // 0xED => self.absolute(Instruction{ .R = CPU(T).sbc }),

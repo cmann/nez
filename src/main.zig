@@ -1,22 +1,24 @@
 const std = @import("std");
 const fs = std.fs;
 const process = std.process;
+const warn = std.debug.warn;
 
 var a: *std.mem.Allocator = undefined;
 
 const DecodeError = error{InvalidOpcode};
+const ExecutionError = error{InfiniteLoop};
 
 const StatusRegister = packed union {
     raw: u8,
     flags: packed struct {
-        c: bool,
-        z: bool,
-        i: bool,
-        d: bool,
-        b: bool,
-        u: bool,
-        v: bool,
         n: bool,
+        v: bool,
+        u: bool,
+        b: bool,
+        d: bool,
+        i: bool,
+        z: bool,
+        c: bool,
     },
 };
 
@@ -72,9 +74,13 @@ fn CPU(comptime T: type) type {
             };
         }
 
+        pub fn sp16(self: CPU(T)) u16 {
+            return 0x0100 | @as(u16, self.registers.sp);
+        }
+
         pub fn step(self: *CPU(T)) !void {
             const opcode = self.fetch();
-            std.debug.warn("OPCODE: {X}\n", .{opcode});
+            warn("OPCODE: {X}\n", .{opcode});
             self.tick();
 
             try self.exec(opcode);
@@ -92,23 +98,35 @@ fn CPU(comptime T: type) type {
         }
 
         fn setNZ(self: *CPU(T), result: u8) void {
-            self.registers.p.flags.z = result & 0xFF > 0;
-            self.registers.p.flags.n = result >> 7 > 0;
+            self.registers.p.flags.z = result == 0;
+            self.registers.p.flags.n = result >> 7 == 1;
         }
 
         // TODO: Might be missing a cycle here
-        fn relative(self: *CPU(T), branch: bool) void {
+        fn relative(self: *CPU(T), branch: bool) !void {
             const operand = self.fetch();
             self.tick();
+
+            warn("OPERAND {X}\n", .{operand});
+            warn("TAKE BRANCH? {}\n", .{branch});
 
             if (branch) {
                 const oldPC = self.registers.pc;
                 const signed = @bitCast(i8, operand);
+                warn("OLD PC {}\n", .{oldPC});
+                warn("SIGNED {}\n", .{signed});
+
                 if (signed >= 0) {
                     self.registers.pc += operand; // TODO: Only add operand to PCL and fix PCH next cycle
                 } else {
-                    self.registers.pc -= @intCast(u8, operand);
+                    self.registers.pc -= @intCast(u8, signed * -1);
                 }
+                warn("NEW PC {}\n", .{self.registers.pc});
+
+                if (self.registers.pc == oldPC - 2) {
+                    return ExecutionError.InfiniteLoop;
+                }
+
                 self.pins.a = self.registers.pc;
                 self.tick();
 
@@ -311,9 +329,11 @@ fn CPU(comptime T: type) type {
         }
 
         fn compare(self: *CPU(T), value: u8, register: u8) void {
-            const diff: u16 = register - value;
+            warn("!!!! {X} - {X} = ", .{ register, value });
+            const diff: u16 = register -% value;
+            warn("{X} !!!!\n", .{@truncate(u8, diff)});
             self.setNZ(@truncate(u8, diff));
-            self.registers.p.flags.c = diff & 0xFF00 == 0;
+            self.registers.p.flags.c = register >= value;
         }
 
         fn cmp(self: *CPU(T), value: u8) void {
@@ -394,13 +414,13 @@ fn CPU(comptime T: type) type {
             const lo = self.fetch();
             self.tick();
 
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.pins.d = @truncate(u8, self.registers.pc >> 8);
             self.registers.sp -= 1;
             self.pins.rw = false;
             self.tick();
 
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.pins.d = @truncate(u8, self.registers.pc);
             self.registers.sp -= 1;
             self.pins.rw = false;
@@ -446,7 +466,7 @@ fn CPU(comptime T: type) type {
         }
 
         fn pha(self: *CPU(T)) void {
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.pins.d = self.registers.a;
             self.pins.rw = false;
             self.registers.sp -= 1;
@@ -454,7 +474,7 @@ fn CPU(comptime T: type) type {
         }
 
         fn php(self: *CPU(T)) void {
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.pins.d = self.registers.p.raw;
             self.pins.rw = false;
             self.registers.sp -= 1;
@@ -463,16 +483,17 @@ fn CPU(comptime T: type) type {
 
         fn pla(self: *CPU(T)) void {
             self.registers.sp += 1;
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.tick();
             self.registers.a = self.pins.d;
+            self.setNZ(self.registers.a);
         }
 
         fn plp(self: *CPU(T)) void {
             self.registers.sp += 1;
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.tick();
-            self.registers.p.raw = self.pins.d;
+            self.registers.p.raw = self.pins.d | 0b00110000;
         }
 
         fn rol(self: *CPU(T), value: u8) u8 {
@@ -497,12 +518,12 @@ fn CPU(comptime T: type) type {
             self.tick();
 
             self.registers.sp += 1;
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.tick();
 
             const lo = self.pins.d;
             self.registers.sp += 1;
-            self.pins.a = self.registers.sp;
+            self.pins.a = self.sp16();
             self.tick();
 
             self.registers.pc = word(lo, self.pins.d);
@@ -744,7 +765,7 @@ const Context = struct {
     }
 
     pub fn tick(self: Context, cur: Pins) Pins {
-        std.debug.warn("\nIN:  {X}\n", .{cur});
+        warn("\nIN:  {X}\n", .{cur});
         const addr = cur.a;
         var next = cur;
 
@@ -754,7 +775,7 @@ const Context = struct {
             self.memory[addr] = cur.d;
         }
 
-        std.debug.warn("OUT: {X}\n\n", .{next});
+        warn("OUT: {X}\n\n", .{next});
         return next;
     }
 };
@@ -781,22 +802,20 @@ pub fn main() !void {
     var cpu = CPU(Context).init(&context);
 
     // TODO: Figure out why the code segment starts here and not at 0x0400
-    cpu.registers.pc = 0x03F6;
-    cpu.pins.a = 0x03F6;
+    cpu.registers.pc = 0x0400;
+    cpu.pins.a = 0x0400;
     cpu.pins.d = 0xD8;
 
     while (true) {
         const opcode = context.memory[cpu.registers.pc];
-        std.debug.warn("\n{X} ", .{opcode});
+        warn("\n{X} ", .{opcode});
         const instruction = try decode(opcode);
 
-        std.debug.warn("{} {} {}\n", .{ instruction.type, instruction.mode, instruction.access });
+        warn("{} {} {}\n", .{ instruction.type, instruction.mode, instruction.access });
 
         try cpu.step();
-        std.debug.warn("REGISTERS: {X}\n", .{cpu.registers});
-        std.debug.warn("SR: {X}\n", .{cpu.registers.p.flags});
-        // try instruction.exec(&context);
-        // break;
+        warn("REGISTERS: {X}\n", .{cpu.registers});
+        warn("SR: {X}\n", .{cpu.registers.p.flags});
     }
 }
 

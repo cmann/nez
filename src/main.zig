@@ -74,6 +74,7 @@ fn CPU(comptime T: type) type {
 
         pub fn step(self: *CPU(T)) !void {
             const opcode = self.fetch();
+            std.debug.warn("OPCODE: {X}\n", .{opcode});
             self.tick();
 
             try self.exec(opcode);
@@ -81,6 +82,7 @@ fn CPU(comptime T: type) type {
 
         fn tick(self: *CPU(T)) void {
             self.pins = self.context.tick(self.pins);
+            self.pins.rw = true;
         }
 
         fn fetch(self: *CPU(T)) u8 {
@@ -95,13 +97,18 @@ fn CPU(comptime T: type) type {
         }
 
         // TODO: Might be missing a cycle here
-        fn relative(self: *CPU(T), instruction: fn (*CPU(T)) bool) void {
+        fn relative(self: *CPU(T), branch: bool) void {
             const operand = self.fetch();
             self.tick();
 
-            if (instruction(self)) {
-                oldPC = self.registers.pc;
-                self.registers.pc += operand; // TODO: Only add operand to PCL and fix PCH next cycle
+            if (branch) {
+                const oldPC = self.registers.pc;
+                const signed = @bitCast(i8, operand);
+                if (signed >= 0) {
+                    self.registers.pc += operand; // TODO: Only add operand to PCL and fix PCH next cycle
+                } else {
+                    self.registers.pc -= @intCast(u8, operand);
+                }
                 self.pins.a = self.registers.pc;
                 self.tick();
 
@@ -256,8 +263,6 @@ fn CPU(comptime T: type) type {
 
                     self.pins.d = rw(self, val);
                     self.tick();
-
-                    self.pins.rw = true;
                 },
             }
         }
@@ -324,7 +329,7 @@ fn CPU(comptime T: type) type {
         }
 
         fn dec(self: *CPU(T), value: u8) u8 {
-            const result = value - 1;
+            const result = value -% 1;
             self.setNZ(result);
             return result;
         }
@@ -354,6 +359,59 @@ fn CPU(comptime T: type) type {
 
         fn iny(self: *CPU(T)) void {
             self.registers.y = self.inc(self.registers.y);
+        }
+
+        fn jmp(self: *CPU(T)) void {
+            const lo = self.fetch();
+            self.tick();
+
+            self.registers.pc = word(lo, self.pins.d);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
+        fn jmpIndirect(self: *CPU(T)) void {
+            const lo = self.fetch();
+            self.tick();
+
+            const hi = self.fetch();
+            self.pins.a = word(lo, hi);
+            self.tick();
+
+            const plo = self.fetch();
+            self.pins.a += 1;
+            self.pins.a &= 0x00FF;
+            self.pins.a &= @as(u16, hi) << 8;
+            self.tick();
+
+            self.registers.pc = word(plo, self.pins.d);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
+        // TODO: Not sure about this one
+        fn jsr(self: *CPU(T)) void {
+            const lo = self.fetch();
+            self.tick();
+
+            self.pins.a = self.registers.sp;
+            self.pins.d = @truncate(u8, self.registers.pc >> 8);
+            self.registers.sp -= 1;
+            self.pins.rw = false;
+            self.tick();
+
+            self.pins.a = self.registers.sp;
+            self.pins.d = @truncate(u8, self.registers.pc);
+            self.registers.sp -= 1;
+            self.pins.rw = false;
+            self.tick();
+
+            self.pins.a = self.registers.pc;
+            self.tick();
+
+            self.registers.pc = word(lo, self.pins.d);
+            self.pins.a = self.registers.pc;
+            self.tick();
         }
 
         fn lda(self: *CPU(T), value: u8) void {
@@ -393,7 +451,6 @@ fn CPU(comptime T: type) type {
             self.pins.rw = false;
             self.registers.sp -= 1;
             self.tick();
-            self.pins.rw = true;
         }
 
         fn php(self: *CPU(T)) void {
@@ -402,7 +459,6 @@ fn CPU(comptime T: type) type {
             self.pins.rw = false;
             self.registers.sp -= 1;
             self.tick();
-            self.pins.rw = true;
         }
 
         fn pla(self: *CPU(T)) void {
@@ -435,6 +491,26 @@ fn CPU(comptime T: type) type {
             result |= carry;
             self.setNZ(result);
             return result;
+        }
+
+        fn rts(self: *CPU(T)) void {
+            self.tick();
+
+            self.registers.sp += 1;
+            self.pins.a = self.registers.sp;
+            self.tick();
+
+            const lo = self.pins.d;
+            self.registers.sp += 1;
+            self.pins.a = self.registers.sp;
+            self.tick();
+
+            self.registers.pc = word(lo, self.pins.d);
+            self.tick();
+
+            self.registers.pc += 1;
+            self.pins.a = self.registers.pc;
+            self.tick();
         }
 
         fn sbc(self: *CPU(T), value: u8) void {
@@ -510,7 +586,7 @@ fn CPU(comptime T: type) type {
                 0x0A => self.accumulator(CPU(T).asl),
                 0x0D => self.absolute(Instruction{ .R = CPU(T).ora }),
                 0x0E => self.absolute(Instruction{ .RW = CPU(T).asl }),
-                // 0x10 => self.relative(Instruction{ .R = CPU(T).bpl }),
+                0x10 => self.relative(!self.registers.p.flags.n),
                 0x11 => self.indirectIndexed(Instruction{ .R = CPU(T).ora }),
                 0x15 => self.zeroPageX(Instruction{ .R = CPU(T).ora }),
                 0x16 => self.zeroPageX(Instruction{ .RW = CPU(T).asl }),
@@ -518,7 +594,7 @@ fn CPU(comptime T: type) type {
                 0x19 => self.absoluteY(Instruction{ .R = CPU(T).ora }),
                 0x1D => self.absoluteX(Instruction{ .R = CPU(T).ora }),
                 0x1E => self.absoluteX(Instruction{ .RW = CPU(T).asl }),
-                // 0x20 => self.absolute(Instruction{ .RW = CPU(T).jsr }),
+                0x20 => self.jsr(),
                 0x21 => self.indexedIndirect(Instruction{ .R = CPU(T).anda }),
                 0x24 => self.zeroPage(Instruction{ .R = CPU(T).bit }),
                 0x25 => self.zeroPage(Instruction{ .R = CPU(T).anda }),
@@ -529,7 +605,7 @@ fn CPU(comptime T: type) type {
                 0x2C => self.absolute(Instruction{ .R = CPU(T).bit }),
                 0x2D => self.absolute(Instruction{ .R = CPU(T).anda }),
                 0x2E => self.absolute(Instruction{ .RW = CPU(T).rol }),
-                // 0x30 => self.relative(Instruction{ .R = CPU(T).bmi }),
+                0x30 => self.relative(self.registers.p.flags.n),
                 0x31 => self.indirectIndexed(Instruction{ .R = CPU(T).anda }),
                 0x35 => self.zeroPageX(Instruction{ .R = CPU(T).anda }),
                 0x36 => self.zeroPageX(Instruction{ .RW = CPU(T).rol }),
@@ -544,10 +620,10 @@ fn CPU(comptime T: type) type {
                 0x48 => self.implied(CPU(T).pha),
                 0x49 => self.immediate(CPU(T).eor),
                 0x4A => self.accumulator(CPU(T).lsr),
-                // 0x4C => self.absolute(Instruction{ .R = CPU(T).jmp }),
+                0x4C => self.jmp(),
                 0x4D => self.absolute(Instruction{ .R = CPU(T).eor }),
                 0x4E => self.absolute(Instruction{ .RW = CPU(T).lsr }),
-                // 0x50 => self.relative(Instruction{ .R = CPU(T).bvc }),
+                0x50 => self.relative(!self.registers.p.flags.v),
                 0x51 => self.indirectIndexed(Instruction{ .R = CPU(T).eor }),
                 0x55 => self.zeroPageX(Instruction{ .R = CPU(T).eor }),
                 0x56 => self.zeroPageX(Instruction{ .RW = CPU(T).lsr }),
@@ -555,17 +631,17 @@ fn CPU(comptime T: type) type {
                 0x59 => self.absoluteY(Instruction{ .R = CPU(T).eor }),
                 0x5D => self.absoluteX(Instruction{ .R = CPU(T).eor }),
                 0x5E => self.absoluteX(Instruction{ .RW = CPU(T).lsr }),
-                // 0x60 => self.implied(Instruction{ .R = CPU(T).rts }),
+                0x60 => self.rts(),
                 0x61 => self.indexedIndirect(Instruction{ .R = CPU(T).adc }),
                 0x65 => self.zeroPage(Instruction{ .R = CPU(T).adc }),
                 0x66 => self.zeroPage(Instruction{ .RW = CPU(T).ror }),
                 0x68 => self.implied(CPU(T).pla),
                 0x69 => self.immediate(CPU(T).adc),
                 0x6A => self.accumulator(CPU(T).ror),
-                // 0x6C => self.indirect(Instruction{ .R = CPU(T).jmp }),
+                0x6C => self.jmpIndirect(),
                 0x6D => self.absolute(Instruction{ .R = CPU(T).adc }),
                 0x6E => self.absolute(Instruction{ .RW = CPU(T).ror }),
-                // 0x70 => self.relative(Instruction{ .R = CPU(T).bvs }),
+                0x70 => self.relative(self.registers.p.flags.v),
                 0x71 => self.indirectIndexed(Instruction{ .R = CPU(T).adc }),
                 0x75 => self.zeroPageX(Instruction{ .R = CPU(T).adc }),
                 0x76 => self.zeroPageX(Instruction{ .RW = CPU(T).ror }),
@@ -582,7 +658,7 @@ fn CPU(comptime T: type) type {
                 0x8C => self.absolute(Instruction{ .W = CPU(T).sty }),
                 0x8D => self.absolute(Instruction{ .W = CPU(T).sta }),
                 0x8E => self.absolute(Instruction{ .W = CPU(T).stx }),
-                // 0x90 => self.relative(Instruction{ .R = CPU(T).bcc }),
+                0x90 => self.relative(!self.registers.p.flags.c),
                 0x91 => self.indirectIndexed(Instruction{ .W = CPU(T).sta }),
                 0x94 => self.zeroPageX(Instruction{ .W = CPU(T).sty }),
                 0x95 => self.zeroPageX(Instruction{ .W = CPU(T).sta }),
@@ -603,7 +679,7 @@ fn CPU(comptime T: type) type {
                 0xAC => self.absolute(Instruction{ .R = CPU(T).ldy }),
                 0xAD => self.absolute(Instruction{ .R = CPU(T).lda }),
                 0xAE => self.absolute(Instruction{ .R = CPU(T).ldx }),
-                // 0xB0 => self.relative(Instruction{ .R = CPU(T).bcs }),
+                0xB0 => self.relative(self.registers.p.flags.c),
                 0xB1 => self.indirectIndexed(Instruction{ .R = CPU(T).lda }),
                 0xB4 => self.zeroPageX(Instruction{ .R = CPU(T).ldy }),
                 0xB5 => self.zeroPageX(Instruction{ .R = CPU(T).lda }),
@@ -625,7 +701,7 @@ fn CPU(comptime T: type) type {
                 0xCC => self.absolute(Instruction{ .R = CPU(T).cpy }),
                 0xCD => self.absolute(Instruction{ .R = CPU(T).cmp }),
                 0xCE => self.absolute(Instruction{ .RW = CPU(T).dec }),
-                // 0xD0 => self.relative(Instruction{ .R = CPU(T).bne }),
+                0xD0 => self.relative(!self.registers.p.flags.z),
                 0xD1 => self.indirectIndexed(Instruction{ .R = CPU(T).cmp }),
                 0xD5 => self.zeroPageX(Instruction{ .R = CPU(T).cmp }),
                 0xD6 => self.zeroPageX(Instruction{ .RW = CPU(T).dec }),
@@ -644,7 +720,7 @@ fn CPU(comptime T: type) type {
                 0xEC => self.absolute(Instruction{ .R = CPU(T).cpx }),
                 0xED => self.absolute(Instruction{ .R = CPU(T).sbc }),
                 0xEE => self.absolute(Instruction{ .RW = CPU(T).inc }),
-                // 0xF0 => self.relative(Instruction{ .R = CPU(T).beq }),
+                0xF0 => self.relative(self.registers.p.flags.z),
                 0xF1 => self.indirectIndexed(Instruction{ .R = CPU(T).sbc }),
                 0xF5 => self.zeroPageX(Instruction{ .R = CPU(T).sbc }),
                 0xF6 => self.zeroPageX(Instruction{ .RW = CPU(T).inc }),
@@ -668,6 +744,7 @@ const Context = struct {
     }
 
     pub fn tick(self: Context, cur: Pins) Pins {
+        std.debug.warn("\nIN:  {X}\n", .{cur});
         const addr = cur.a;
         var next = cur;
 
@@ -677,6 +754,7 @@ const Context = struct {
             self.memory[addr] = cur.d;
         }
 
+        std.debug.warn("OUT: {X}\n\n", .{next});
         return next;
     }
 };
@@ -701,20 +779,24 @@ pub fn main() !void {
     _ = try file.readAll(context.memory);
 
     var cpu = CPU(Context).init(&context);
-    _ = try cpu.step();
-    try cpu.exec(0x01);
 
     // TODO: Figure out why the code segment starts here and not at 0x0400
     cpu.registers.pc = 0x03F6;
+    cpu.pins.a = 0x03F6;
+    cpu.pins.d = 0xD8;
 
     while (true) {
         const opcode = context.memory[cpu.registers.pc];
+        std.debug.warn("\n{X} ", .{opcode});
         const instruction = try decode(opcode);
 
-        std.debug.warn("{X} {} {} {}\n", .{ opcode, instruction.type, instruction.mode, instruction.access });
+        std.debug.warn("{} {} {}\n", .{ instruction.type, instruction.mode, instruction.access });
 
+        try cpu.step();
+        std.debug.warn("REGISTERS: {X}\n", .{cpu.registers});
+        std.debug.warn("SR: {X}\n", .{cpu.registers.p.flags});
         // try instruction.exec(&context);
-        break;
+        // break;
     }
 }
 
@@ -866,7 +948,7 @@ pub fn decode(opcode: u8) !PrettyInstruction {
         0xEA => PrettyInstruction{ .type = .NOP, .mode = .Implied, .access = .R },
         0xEC => PrettyInstruction{ .type = .CPX, .mode = .Absolute, .access = .R },
         0xED => PrettyInstruction{ .type = .SBC, .mode = .Absolute, .access = .R },
-
+        0xEE => PrettyInstruction{ .type = .INC, .mode = .Absolute, .access = .RW },
         0xF0 => PrettyInstruction{ .type = .BEQ, .mode = .Relative, .access = .R },
         0xF1 => PrettyInstruction{ .type = .SBC, .mode = .IndirectIndexed, .access = .R },
         0xF5 => PrettyInstruction{ .type = .SBC, .mode = .ZeroPageX, .access = .R },

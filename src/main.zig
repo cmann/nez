@@ -11,14 +11,14 @@ const ExecutionError = error{InfiniteLoop};
 const StatusRegister = packed union {
     raw: u8,
     flags: packed struct {
-        n: bool,
-        v: bool,
-        u: bool,
-        b: bool,
-        d: bool,
-        i: bool,
-        z: bool,
         c: bool,
+        z: bool,
+        i: bool,
+        d: bool,
+        b: bool,
+        u: bool,
+        v: bool,
+        n: bool,
     },
 };
 
@@ -312,6 +312,31 @@ fn CPU(comptime T: type) type {
             self.registers.p.flags.z = value & self.registers.a == 0;
         }
 
+        fn brk(self: *CPU(T)) void {
+            self.registers.pc += 1;
+            self.pins.a = self.registers.pc;
+            self.tick();
+
+            self.push(@truncate(u8, self.registers.pc >> 8));
+
+            self.push(@truncate(u8, self.registers.pc));
+
+            self.push(self.registers.p.raw);
+
+            self.registers.p.flags.i = true;
+
+            self.pins.a = 0xFFFE;
+            self.tick();
+
+            const lo = self.pins.d;
+            self.pins.a = 0xFFFF;
+            self.tick();
+
+            self.registers.pc = word(lo, self.pins.d);
+            self.pins.a = self.registers.pc;
+            self.tick(); // TODO: Is prefetching next opcode correct for BRK?
+        }
+
         fn clc(self: *CPU(T)) void {
             self.registers.p.flags.c = false;
         }
@@ -368,7 +393,7 @@ fn CPU(comptime T: type) type {
         }
 
         fn inc(self: *CPU(T), value: u8) u8 {
-            const result = value + 1;
+            const result = value +% 1;
             self.setNZ(result);
             return result;
         }
@@ -381,11 +406,16 @@ fn CPU(comptime T: type) type {
             self.registers.y = self.inc(self.registers.y);
         }
 
-        fn jmp(self: *CPU(T)) void {
+        fn jmp(self: *CPU(T)) !void {
             const lo = self.fetch();
             self.tick();
 
-            self.registers.pc = word(lo, self.pins.d);
+            const newPC = word(lo, self.pins.d);
+            if (newPC == self.registers.pc - 2) {
+                return ExecutionError.InfiniteLoop;
+            }
+            self.registers.pc = newPC;
+
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -398,10 +428,10 @@ fn CPU(comptime T: type) type {
             self.pins.a = word(lo, hi);
             self.tick();
 
-            const plo = self.fetch();
+            const plo = self.pins.d;
             self.pins.a += 1;
             self.pins.a &= 0x00FF;
-            self.pins.a &= @as(u16, hi) << 8;
+            self.pins.a |= @as(u16, hi) << 8;
             self.tick();
 
             self.registers.pc = word(plo, self.pins.d);
@@ -493,6 +523,7 @@ fn CPU(comptime T: type) type {
             self.registers.sp += 1;
             self.pins.a = self.sp16();
             self.tick();
+            warn("PLP {b}\n", .{self.pins.d | 0b0110000});
             self.registers.p.raw = self.pins.d | 0b00110000;
         }
 
@@ -512,6 +543,18 @@ fn CPU(comptime T: type) type {
             result |= carry;
             self.setNZ(result);
             return result;
+        }
+
+        fn rti(self: *CPU(T)) void {
+            self.tick();
+
+            self.registers.p.raw = self.pop();
+
+            const lo = self.pop();
+
+            self.registers.pc = word(lo, self.pop());
+            self.pins.a = self.registers.pc;
+            self.tick();
         }
 
         fn rts(self: *CPU(T)) void {
@@ -596,9 +639,24 @@ fn CPU(comptime T: type) type {
             self.setNZ(self.registers.a);
         }
 
+        fn push(self: *CPU(T), value: u8) void {
+            self.pins.a = self.sp16();
+            self.pins.d = value;
+            self.pins.rw = false;
+            self.registers.sp -= 1;
+            self.tick();
+        }
+
+        fn pop(self: *CPU(T)) u8 {
+            self.registers.sp += 1;
+            self.pins.a = self.sp16();
+            self.tick();
+            return self.pins.d;
+        }
+
         pub fn exec(self: *CPU(T), opcode: u8) !void {
             return switch (opcode) {
-                // 0x00 => self.implied(Instruction{ .R = CPU(T).brk }),
+                0x00 => self.brk(),
                 0x01 => self.indexedIndirect(Instruction{ .R = CPU(T).ora }),
                 0x05 => self.zeroPage(Instruction{ .R = CPU(T).ora }),
                 0x06 => self.zeroPage(Instruction{ .RW = CPU(T).asl }),
@@ -634,7 +692,7 @@ fn CPU(comptime T: type) type {
                 0x39 => self.absoluteY(Instruction{ .R = CPU(T).anda }),
                 0x3D => self.absoluteX(Instruction{ .R = CPU(T).anda }),
                 0x3E => self.absoluteX(Instruction{ .RW = CPU(T).rol }),
-                // 0x40 => self.implied(Instruction{ .R = CPU(T).rti }),
+                0x40 => self.rti(),
                 0x41 => self.indexedIndirect(Instruction{ .R = CPU(T).eor }),
                 0x45 => self.zeroPage(Instruction{ .R = CPU(T).eor }),
                 0x46 => self.zeroPage(Instruction{ .RW = CPU(T).lsr }),
@@ -801,7 +859,6 @@ pub fn main() !void {
 
     var cpu = CPU(Context).init(&context);
 
-    // TODO: Figure out why the code segment starts here and not at 0x0400
     cpu.registers.pc = 0x0400;
     cpu.pins.a = 0x0400;
     cpu.pins.d = 0xD8;
@@ -816,6 +873,7 @@ pub fn main() !void {
         try cpu.step();
         warn("REGISTERS: {X}\n", .{cpu.registers});
         warn("SR: {X}\n", .{cpu.registers.p.flags});
+        warn("SR: {b}\n", .{cpu.registers.p.raw});
     }
 }
 

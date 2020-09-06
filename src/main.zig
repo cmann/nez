@@ -80,7 +80,6 @@ fn CPU(comptime T: type) type {
 
         pub fn step(self: *CPU(T)) !void {
             const opcode = self.fetch();
-            warn("OPCODE: {X}\n", .{opcode});
             self.tick();
 
             try self.exec(opcode);
@@ -107,21 +106,15 @@ fn CPU(comptime T: type) type {
             const operand = self.fetch();
             self.tick();
 
-            warn("OPERAND {X}\n", .{operand});
-            warn("TAKE BRANCH? {}\n", .{branch});
-
             if (branch) {
                 const oldPC = self.registers.pc;
                 const signed = @bitCast(i8, operand);
-                warn("OLD PC {}\n", .{oldPC});
-                warn("SIGNED {}\n", .{signed});
 
                 if (signed >= 0) {
                     self.registers.pc += operand; // TODO: Only add operand to PCL and fix PCH next cycle
                 } else {
-                    self.registers.pc -= @intCast(u8, signed * -1);
+                    self.registers.pc -= @intCast(u16, @as(i16, signed) * -1);
                 }
-                warn("NEW PC {}\n", .{self.registers.pc});
 
                 if (self.registers.pc == oldPC - 2) {
                     return ExecutionError.InfiniteLoop;
@@ -200,11 +193,11 @@ fn CPU(comptime T: type) type {
         }
 
         fn zeroPageIndexed(self: *CPU(T), instruction: Instruction, index: u8) void {
-            self.pins.a = self.fetch();
+            const lo = self.fetch();
+            self.pins.a = lo;
             self.tick();
 
-            const addr: u16 = self.pins.d + index;
-            self.pins.a = addr & 0xFF;
+            self.pins.a = lo +% index;
 
             self.do(instruction);
 
@@ -224,12 +217,13 @@ fn CPU(comptime T: type) type {
             self.pins.a = self.fetch();
             self.tick();
 
-            self.pins.a = self.pins.d + self.registers.x;
+            self.pins.a += self.registers.x;
             self.pins.a &= 0xFF;
             self.tick();
 
             const lo = self.pins.d;
             self.pins.a += 1;
+            self.pins.a &= 0xFF;
             self.tick();
 
             self.pins.a = word(lo, self.pins.d);
@@ -243,11 +237,9 @@ fn CPU(comptime T: type) type {
             self.pins.a = self.fetch();
             self.tick();
 
-            self.pins.a = self.pins.d;
-            self.tick();
-
             const lo = self.pins.d;
             self.pins.a += 1;
+            self.pins.a &= 0xFF;
             self.tick();
 
             const hi = self.pins.d;
@@ -280,18 +272,20 @@ fn CPU(comptime T: type) type {
                     self.tick();
 
                     self.pins.d = rw(self, val);
+                    self.pins.rw = false;
                     self.tick();
                 },
             }
         }
 
         fn adc(self: *CPU(T), value: u8) void {
-            const carry: u16 = if (self.registers.p.flags.c) 1 else 0;
-            const sum = self.registers.a + value + carry;
+            const carry: u8 = if (self.registers.p.flags.c) 1 else 0;
+            const sum = self.registers.a +% value +% carry;
             self.registers.p.flags.v = ~(self.registers.a ^ value) & (self.registers.a ^ sum) & 0x80 > 0;
-            self.registers.p.flags.c = sum & 0xFF00 > 0;
-            self.registers.a = @truncate(u8, sum);
-            self.setNZ(self.registers.a);
+            // self.registers.p.flags.c = sum & 0xFF00 > 0;
+            self.registers.p.flags.c = sum < value or (sum == value and carry == 1);
+            self.setNZ(sum);
+            self.registers.a = sum;
         }
 
         fn anda(self: *CPU(T), value: u8) void {
@@ -354,9 +348,7 @@ fn CPU(comptime T: type) type {
         }
 
         fn compare(self: *CPU(T), value: u8, register: u8) void {
-            warn("!!!! {X} - {X} = ", .{ register, value });
             const diff: u16 = register -% value;
-            warn("{X} !!!!\n", .{@truncate(u8, diff)});
             self.setNZ(@truncate(u8, diff));
             self.registers.p.flags.c = register >= value;
         }
@@ -446,13 +438,13 @@ fn CPU(comptime T: type) type {
 
             self.pins.a = self.sp16();
             self.pins.d = @truncate(u8, self.registers.pc >> 8);
-            self.registers.sp -= 1;
+            self.registers.sp -%= 1;
             self.pins.rw = false;
             self.tick();
 
             self.pins.a = self.sp16();
             self.pins.d = @truncate(u8, self.registers.pc);
-            self.registers.sp -= 1;
+            self.registers.sp -%= 1;
             self.pins.rw = false;
             self.tick();
 
@@ -499,7 +491,7 @@ fn CPU(comptime T: type) type {
             self.pins.a = self.sp16();
             self.pins.d = self.registers.a;
             self.pins.rw = false;
-            self.registers.sp -= 1;
+            self.registers.sp -%= 1;
             self.tick();
         }
 
@@ -507,12 +499,12 @@ fn CPU(comptime T: type) type {
             self.pins.a = self.sp16();
             self.pins.d = self.registers.p.raw;
             self.pins.rw = false;
-            self.registers.sp -= 1;
+            self.registers.sp -%= 1;
             self.tick();
         }
 
         fn pla(self: *CPU(T)) void {
-            self.registers.sp += 1;
+            self.registers.sp +%= 1;
             self.pins.a = self.sp16();
             self.tick();
             self.registers.a = self.pins.d;
@@ -520,10 +512,9 @@ fn CPU(comptime T: type) type {
         }
 
         fn plp(self: *CPU(T)) void {
-            self.registers.sp += 1;
+            self.registers.sp +%= 1;
             self.pins.a = self.sp16();
             self.tick();
-            warn("PLP {b}\n", .{self.pins.d | 0b0110000});
             self.registers.p.raw = self.pins.d | 0b00110000;
         }
 
@@ -560,12 +551,12 @@ fn CPU(comptime T: type) type {
         fn rts(self: *CPU(T)) void {
             self.tick();
 
-            self.registers.sp += 1;
+            self.registers.sp +%= 1;
             self.pins.a = self.sp16();
             self.tick();
 
             const lo = self.pins.d;
-            self.registers.sp += 1;
+            self.registers.sp +%= 1;
             self.pins.a = self.sp16();
             self.tick();
 
@@ -578,11 +569,12 @@ fn CPU(comptime T: type) type {
         }
 
         fn sbc(self: *CPU(T), value: u8) void {
-            const carry: u16 = if (self.registers.p.flags.c) 1 else 0;
-            const diff = self.registers.a - value - carry;
-            self.registers.p.flags.v = (self.registers.a ^ value) & (self.registers.a ^ diff) & 0x80 > 0;
-            self.registers.p.flags.c = diff & 0xFF00 == 0;
-            self.registers.a = @truncate(u8, diff);
+            const orig = self.registers.a;
+            const carry: u8 = if (self.registers.p.flags.c) 0 else 1;
+            self.registers.a = self.registers.a -% value -% carry;
+            self.registers.p.flags.v = (orig ^ value) & (orig ^ self.registers.a) & 0x80 > 0;
+            self.registers.p.flags.c = orig > value or (orig == value and carry == 0);
+            self.setNZ(self.registers.a);
         }
 
         fn sec(self: *CPU(T)) void {
@@ -631,7 +623,6 @@ fn CPU(comptime T: type) type {
 
         fn txs(self: *CPU(T)) void {
             self.registers.sp = self.registers.x;
-            self.setNZ(self.registers.sp);
         }
 
         fn tya(self: *CPU(T)) void {
@@ -643,12 +634,12 @@ fn CPU(comptime T: type) type {
             self.pins.a = self.sp16();
             self.pins.d = value;
             self.pins.rw = false;
-            self.registers.sp -= 1;
+            self.registers.sp -%= 1;
             self.tick();
         }
 
         fn pop(self: *CPU(T)) u8 {
-            self.registers.sp += 1;
+            self.registers.sp +%= 1;
             self.pins.a = self.sp16();
             self.tick();
             return self.pins.d;
@@ -742,7 +733,7 @@ fn CPU(comptime T: type) type {
                 0x94 => self.zeroPageX(Instruction{ .W = CPU(T).sty }),
                 0x95 => self.zeroPageX(Instruction{ .W = CPU(T).sta }),
                 0x96 => self.zeroPageY(Instruction{ .W = CPU(T).stx }),
-                0x98 => self.implied(CPU(T).tay),
+                0x98 => self.implied(CPU(T).tya),
                 0x99 => self.absoluteY(Instruction{ .W = CPU(T).sta }),
                 0x9A => self.implied(CPU(T).txs),
                 0x9D => self.absoluteX(Instruction{ .W = CPU(T).sta }),
@@ -823,7 +814,6 @@ const Context = struct {
     }
 
     pub fn tick(self: Context, cur: Pins) Pins {
-        warn("\nIN:  {X}\n", .{cur});
         const addr = cur.a;
         var next = cur;
 
@@ -833,7 +823,7 @@ const Context = struct {
             self.memory[addr] = cur.d;
         }
 
-        warn("OUT: {X}\n\n", .{next});
+        // warn("OUT: {X}\n\n", .{next});
         return next;
     }
 };
@@ -865,15 +855,14 @@ pub fn main() !void {
 
     while (true) {
         const opcode = context.memory[cpu.registers.pc];
-        warn("\n{X} ", .{opcode});
         const instruction = try decode(opcode);
 
-        warn("{} {} {}\n", .{ instruction.type, instruction.mode, instruction.access });
-
-        try cpu.step();
-        warn("REGISTERS: {X}\n", .{cpu.registers});
-        warn("SR: {X}\n", .{cpu.registers.p.flags});
-        warn("SR: {b}\n", .{cpu.registers.p.raw});
+        cpu.step() catch |err| {
+            warn("{} {} {}\n", .{ instruction.type, instruction.mode, instruction.access });
+            warn("REGISTERS: {X}\n", .{cpu.registers});
+            warn("SR: {X}\n", .{cpu.registers.p.flags});
+            return err;
+        };
     }
 }
 

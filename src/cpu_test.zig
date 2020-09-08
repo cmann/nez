@@ -5,8 +5,10 @@ const warn = std.debug.warn;
 
 const CPU = @import("cpu.zig");
 
+const a = std.testing.allocator;
+
 const Context = struct {
-    memory: [0x10000]u8,
+    memory: []u8,
 
     pub fn init() !Context {
         return Context{
@@ -30,9 +32,11 @@ const Context = struct {
 
 test "functional test" {
     var context = try Context.init();
+    context.memory = try a.alloc(u8, 0x10000);
+    defer a.free(context.memory);
 
     const file = try (fs.cwd().openFile("../6502_functional_test.bin", .{}));
-    _ = try file.readAll(&context.memory);
+    _ = try file.readAll(context.memory);
 
     var cpu = CPU.CPU(Context).init(&context);
 

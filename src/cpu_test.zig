@@ -36,7 +36,10 @@ test "functional test" {
     defer a.free(context.memory);
 
     const file = try (fs.cwd().openFile("../6502_functional_test.bin", .{}));
+    errdefer file.close();
+
     _ = try file.readAll(context.memory);
+    file.close();
 
     var cpu = CPU.CPU(Context).init(&context);
 

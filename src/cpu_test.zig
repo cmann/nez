@@ -30,12 +30,12 @@ const Context = struct {
     }
 };
 
-test "functional test" {
+test "6502_functional_test" {
     var context = try Context.init();
     context.memory = try a.alloc(u8, 0x10000);
     defer a.free(context.memory);
 
-    const file = try (fs.cwd().openFile("../6502_functional_test.bin", .{}));
+    const file = try (fs.cwd().openFile("../rom/6502_functional_test.bin", .{}));
     errdefer file.close();
 
     _ = try file.readAll(context.memory);

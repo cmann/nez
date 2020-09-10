@@ -494,6 +494,9 @@ pub fn CPU(comptime T: type) type {
         }
 
         fn php(self: *CPU(T)) void {
+            var p = self.registers.p;
+            p.flags.u = true;
+            p.flags.b = true;
             self.push(self.registers.p.raw);
         }
 
@@ -527,7 +530,7 @@ pub fn CPU(comptime T: type) type {
         fn rti(self: *CPU(T)) void {
             self.tick();
 
-            self.registers.p.raw = self.pop();
+            self.registers.p.raw = self.pop() | 0b00110000;
 
             const lo = self.pop();
 

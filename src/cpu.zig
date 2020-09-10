@@ -29,6 +29,8 @@ pub const Pins = struct {
     d: u8,
     rw: bool,
     sync: bool,
+    nmi: bool = true,
+    irq: bool = true,
 };
 
 pub fn CPU(comptime T: type) type {
@@ -36,6 +38,9 @@ pub fn CPU(comptime T: type) type {
         registers: Registers,
         pins: Pins,
         context: *T,
+
+        nmiDetected: bool = false,
+        irqDetected: bool = false,
 
         const readInstruction = fn (*CPU(T), u8) void;
         const writeInstruction = fn (*CPU(T)) u8;
@@ -69,8 +74,53 @@ pub fn CPU(comptime T: type) type {
         }
 
         fn tick(self: *CPU(T)) void {
+            const old = self.pins;
             self.pins = self.context.tick(self.pins);
             self.pins.rw = true;
+
+            // NMI signal persists until handled
+            if (!self.nmiDetected) {
+                self.nmiDetected = old.nmi and !self.pins.nmi;
+            }
+
+            self.irqDetected = !self.pins.irq and !self.registers.p.flags.i;
+        }
+
+        fn handleInterrupts(self: *CPU(T), doBrk: bool) void {
+            if (!self.nmiDetected and !self.irqDetected and !doBrk) {
+                return;
+            }
+
+            // PC increment is suppressed for NMI/IRQ
+            if (doBrk) {
+                self.registers.pc += 1;
+                self.pins.a = self.registers.pc;
+            }
+            self.tick();
+
+            self.push(@truncate(u8, self.registers.pc >> 8));
+
+            self.push(@truncate(u8, self.registers.pc));
+
+            // Check if NMI or NMI hijack
+            const nmi = self.nmiDetected;
+
+            var p = self.registers.p;
+            p.flags.u = true;
+            p.flags.b = if (doBrk) true else false;
+            self.push(p.raw);
+
+            self.registers.p.flags.i = true;
+            self.pins.a = if (nmi) 0xFFFA else 0xFFFE;
+            self.tick();
+
+            const lo = self.pins.d;
+            self.pins.a = if (nmi) 0xFFFB else 0xFFFF;
+            self.tick();
+
+            self.registers.pc = word(lo, self.pins.d);
+            self.pins.a = self.registers.pc;
+            self.tick();
         }
 
         fn fetch(self: *CPU(T)) u8 {
@@ -289,28 +339,7 @@ pub fn CPU(comptime T: type) type {
         }
 
         fn brk(self: *CPU(T)) void {
-            self.registers.pc += 1;
-            self.pins.a = self.registers.pc;
-            self.tick();
-
-            self.push(@truncate(u8, self.registers.pc >> 8));
-
-            self.push(@truncate(u8, self.registers.pc));
-
-            self.push(self.registers.p.raw);
-
-            self.registers.p.flags.i = true;
-
-            self.pins.a = 0xFFFE;
-            self.tick();
-
-            const lo = self.pins.d;
-            self.pins.a = 0xFFFF;
-            self.tick();
-
-            self.registers.pc = word(lo, self.pins.d);
-            self.pins.a = self.registers.pc;
-            self.tick(); // TODO: Is prefetching next opcode correct for BRK?
+            self.handleInterrupts(true);
         }
 
         fn clc(self: *CPU(T)) void {

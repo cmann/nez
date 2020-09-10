@@ -17,13 +17,12 @@ const Context = struct {
     }
 
     pub fn tick(self: *Context, cur: CPU.Pins) CPU.Pins {
-        const addr = cur.a;
         var next = cur;
 
         if (cur.rw) {
-            next.d = self.memory[addr];
+            next.d = self.memory[cur.a];
         } else {
-            self.memory[addr] = cur.d;
+            self.memory[cur.a] = cur.d;
         }
 
         return next;

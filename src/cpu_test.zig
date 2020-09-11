@@ -37,9 +37,10 @@ const InterruptContext = struct {
             next.d = self.memory[cur.a];
         } else {
             self.memory[cur.a] = cur.d;
+
             if (cur.a == 0xBFFC) {
-                next.irq = cur.d & 0b1 == 0;
-                next.nmi = cur.d & 0b10 == 0;
+                next.irq = cur.d & 1 == 0;
+                next.nmi = cur.d & 1 << 1 == 0;
             }
         }
 

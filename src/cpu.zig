@@ -136,6 +136,7 @@ pub fn CPU(comptime T: type) type {
 
         // TODO: Might be missing a cycle here
         fn relative(self: *CPU(T), branch: bool) !void {
+            self.handleInterrupts(false);
             const operand = self.fetch();
             self.tick();
 
@@ -156,19 +157,25 @@ pub fn CPU(comptime T: type) type {
                 self.pins.a = self.registers.pc;
                 self.tick();
 
-                if (self.registers.pc & 0xFF00 != oldPC & 0xFF00)
+                if (self.registers.pc & 0xFF00 != oldPC & 0xFF00) {
+                    self.handleInterrupts(false);
                     self.tick();
+                }
             }
         }
 
         fn implied(self: *CPU(T), instruction: impliedInstruction) void {
             instruction(self);
+
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
 
         fn accumulator(self: *CPU(T), instruction: readWriteInstruction) void {
             self.registers.a = instruction(self, self.registers.a);
+
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -176,6 +183,8 @@ pub fn CPU(comptime T: type) type {
         fn immediate(self: *CPU(T), instruction: readInstruction) void {
             const value = self.fetch();
             instruction(self, value);
+
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -189,6 +198,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -204,6 +214,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -221,6 +232,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -234,6 +246,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -262,6 +275,7 @@ pub fn CPU(comptime T: type) type {
             self.pins.a = word(lo, self.pins.d);
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -282,6 +296,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -418,6 +433,7 @@ pub fn CPU(comptime T: type) type {
             }
             self.registers.pc = newPC;
 
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -453,6 +469,7 @@ pub fn CPU(comptime T: type) type {
             self.pins.a = self.registers.pc;
             self.tick();
 
+            self.handleInterrupts(false);
             self.registers.pc = word(lo, self.pins.d);
             self.pins.a = self.registers.pc;
             self.tick();
@@ -535,6 +552,7 @@ pub fn CPU(comptime T: type) type {
             const lo = self.pop();
 
             self.registers.pc = word(lo, self.pop());
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }
@@ -550,6 +568,7 @@ pub fn CPU(comptime T: type) type {
             self.tick();
 
             self.registers.pc += 1;
+            self.handleInterrupts(false);
             self.pins.a = self.registers.pc;
             self.tick();
         }

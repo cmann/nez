@@ -13,7 +13,7 @@ const Context = struct {
     memory: []u8,
     cycles: u64 = 0,
 
-    pub fn init() !Context {
+    pub fn init() Context {
         return Context{
             .memory = undefined,
         };
@@ -34,7 +34,7 @@ const Context = struct {
 };
 
 test "6502_functional_test" {
-    var context = try Context.init();
+    var context = Context.init();
     context.memory = try a.alloc(u8, 0x10000);
     defer a.free(context.memory);
 

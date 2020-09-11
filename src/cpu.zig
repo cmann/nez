@@ -86,6 +86,18 @@ pub fn CPU(comptime T: type) type {
             self.irqDetected = !self.pins.irq and !self.registers.p.flags.i;
         }
 
+        fn fetch(self: *CPU(T)) u8 {
+            self.registers.pc += 1;
+            self.pins.a = self.registers.pc;
+            return self.pins.d;
+        }
+
+        fn prefetch(self: *CPU(T)) void {
+            self.handleInterrupts(false);
+            self.pins.a = self.registers.pc;
+            self.tick();
+        }
+
         fn handleInterrupts(self: *CPU(T), doBrk: bool) void {
             if (!self.nmiDetected and !self.irqDetected and !doBrk) {
                 return;
@@ -123,17 +135,6 @@ pub fn CPU(comptime T: type) type {
             self.tick();
         }
 
-        fn fetch(self: *CPU(T)) u8 {
-            self.registers.pc += 1;
-            self.pins.a = self.registers.pc;
-            return self.pins.d;
-        }
-
-        fn setNZ(self: *CPU(T), result: u8) void {
-            self.registers.p.flags.z = result == 0;
-            self.registers.p.flags.n = result >> 7 == 1;
-        }
-
         // TODO: Might be missing a cycle here
         fn relative(self: *CPU(T), branch: bool) !void {
             self.handleInterrupts(false);
@@ -167,26 +168,20 @@ pub fn CPU(comptime T: type) type {
         fn implied(self: *CPU(T), instruction: impliedInstruction) void {
             instruction(self);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn accumulator(self: *CPU(T), instruction: readWriteInstruction) void {
             self.registers.a = instruction(self, self.registers.a);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn immediate(self: *CPU(T), instruction: readInstruction) void {
             const value = self.fetch();
             instruction(self, value);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn absolute(self: *CPU(T), instruction: Instruction) void {
@@ -198,9 +193,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn absoluteIndexed(self: *CPU(T), instruction: Instruction, index: u8) void {
@@ -214,9 +207,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn absoluteX(self: *CPU(T), instruction: Instruction) void {
@@ -229,12 +220,9 @@ pub fn CPU(comptime T: type) type {
 
         fn zeroPage(self: *CPU(T), instruction: Instruction) void {
             self.pins.a = self.fetch();
-
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn zeroPageIndexed(self: *CPU(T), instruction: Instruction, index: u8) void {
@@ -243,12 +231,9 @@ pub fn CPU(comptime T: type) type {
             self.tick();
 
             self.pins.a = lo +% index;
-
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn zeroPageX(self: *CPU(T), instruction: Instruction) void {
@@ -275,9 +260,7 @@ pub fn CPU(comptime T: type) type {
             self.pins.a = word(lo, self.pins.d);
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn indirectIndexed(self: *CPU(T), instruction: Instruction) void {
@@ -296,9 +279,7 @@ pub fn CPU(comptime T: type) type {
 
             self.exec(instruction);
 
-            self.handleInterrupts(false);
-            self.pins.a = self.registers.pc;
-            self.tick();
+            self.prefetch();
         }
 
         fn exec(self: *CPU(T), instruction: Instruction) void {
@@ -647,6 +628,11 @@ pub fn CPU(comptime T: type) type {
 
         fn sp16(self: CPU(T)) u16 {
             return 0x0100 | @as(u16, self.registers.sp);
+        }
+
+        fn setNZ(self: *CPU(T), result: u8) void {
+            self.registers.p.flags.z = result == 0;
+            self.registers.p.flags.n = result >> 7 == 1;
         }
 
         pub fn step(self: *CPU(T)) !void {

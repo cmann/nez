@@ -103,6 +103,8 @@ pub fn CPU(comptime T: type) type {
                 return;
             }
 
+            self.irqDetected = false;
+
             // PC increment is suppressed for NMI/IRQ
             if (doBrk) {
                 self.registers.pc += 1;
@@ -116,6 +118,7 @@ pub fn CPU(comptime T: type) type {
 
             // Check if NMI or NMI hijack
             const nmi = self.nmiDetected;
+            self.nmiDetected = false;
 
             var p = self.registers.p;
             p.flags.u = true;

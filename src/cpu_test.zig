@@ -64,8 +64,6 @@ test "6502_functional_test" {
     cpu.pins.d = context.memory[cpu.registers.pc];
 
     var start = c.timeval{ .tv_sec = 0, .tv_usec = 0 };
-    var end = c.timeval{ .tv_sec = 0, .tv_usec = 0 };
-
     _ = c.gettimeofday(&start, null);
 
     while (true) {
@@ -85,6 +83,7 @@ test "6502_functional_test" {
         };
     }
 
+    var end = c.timeval{ .tv_sec = 0, .tv_usec = 0 };
     _ = c.gettimeofday(&end, null);
 
     const usec = (end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec;

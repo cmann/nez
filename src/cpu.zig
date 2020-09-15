@@ -79,10 +79,7 @@ pub fn CPU(comptime T: type) type {
             self.pins.rw = true;
 
             // NMI signal persists until handled
-            if (!self.nmiDetected) {
-                self.nmiDetected = old.nmi and !self.pins.nmi;
-            }
-
+            self.nmiDetected = self.nmiDetected or (old.nmi and !self.pins.nmi);
             self.irqDetected = !self.pins.irq and !self.registers.p.flags.i;
         }
 

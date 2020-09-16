@@ -11,8 +11,8 @@ const Registers = struct {
 };
 
 const Pins = struct {
-    d: u8,
-    a: u4,
+    regD: u8,
+    regA: u4,
     rw: bool,
     int: bool,
 };

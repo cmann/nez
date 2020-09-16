@@ -22,6 +22,9 @@ const NESContext = struct {
     cpuMemory: []u8 = undefined,
     ppuMemory: []u8 = undefined,
 
+    ppu: PPU.PPU,
+    ppuPins: PPU.Pins,
+
     pub fn init() Context {
         return Context{
             .cpuMemory = a.alloc(u8, 0x0800),
@@ -34,19 +37,45 @@ const NESContext = struct {
         a.free(self.ppuMemory);
     }
 
-    pub fn tick(self: *Context, in: CPU.Pins) CPU.Pins {
-        var out = in;
+    pub fn tick(self: *Context, cpuIn: CPU.Pins) CPU.Pins {
+        var cpuOut = cpuIn;
 
-        out = switch (pins.a) {
-            0x0000...0x1FFF => self.cpuMemoryAccess(pin),
-            0x2000...0x3FFF => self.ppuAccess(pins),
+        cpuOut = switch (pins.a) {
+            0x0000...0x1FFF => self.cpuMemoryAccess(cpuIn),
             // 0x4000...0x4017 => self.apuIOStuff(addr),
             // 0x4018...0x401F => self.apuIODisabledStuff(addr),
             // 0x4020...0xFFFF => self.cartridgeAccess(addr),
-            else => pins, // Temporary do nothing
+            else => cpuOut, // Temporary do nothing
         };
 
-        return out;
+        cpuOut = self.tickPPU(cpuOut);
+
+        return cpuOut;
+    }
+
+    fn tickPPU(self: *Context, cpuIn: CPU.Pins) CPU.Pins {
+        var cpuOut = cpuIn;
+
+        const addr = switch (cpuIn.a) {
+            0x2000...0x2007 => cpuIn.a,
+            0x2008...0x3FFF => 0x2000 + cpuIn.a % 0x2008,
+            else => 0,
+        };
+
+        if (addr != 0) {
+            self.ppuPins.regA = @truncate(u4, addr) & 0x7;
+            self.ppuPins.regD = cpuIn.d;
+            self.ppuPins.rw = cpuIn.rw;
+        }
+
+        self.ppuPins = self.ppu.tick(self.ppuPins);
+
+        cpuOut.d = self.ppuPins.d;
+
+        self.ppuPins = self.ppu.tick(self.ppuPins);
+        self.ppuPins = self.ppu.tick(self.ppuPins);
+
+        return cpuOut;
     }
 
     fn cpuMemoryAccess(self: *Context, in: CPU.Pins) CPU.Pins {
@@ -65,15 +94,5 @@ const NESContext = struct {
         }
 
         return out;
-    }
-
-    fn ppuAccess(self: *Context, in: CPU.Pins) CPU.Pins {
-        const out = in;
-
-        const addr = switch (pins.a) {
-            0x2000...0x2007 => pins.a,
-            0x2008...0x3FFF => 0x2000 + pins.a % 0x2008,
-            else => unreachable,
-        };
     }
 };

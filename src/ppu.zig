@@ -31,6 +31,18 @@ pub fn PPU(comptime T: type) type {
             };
         }
 
-        fn tick(self: *PPU(T)) void {}
+        fn tick(self: *PPU(T), pins: Pins) Pins {
+            // switch (pins.regA) {
+            //     0x2000 => self.registers.ctrl = pins.regD,
+            //     0x2001 => self.registers.mask = pins.regD,
+            //     0x2002 => self.registers.status = pins.regD,
+            //     0x2003 => self.registers.oamaddr = pins.regD,
+            //     0x2004 => self.registers.oamdata = pins.regD,
+            //     0x2005 => self.registers.scroll = pins.regD,
+            //     0x2006 => self.registers.addr = pins.regD,
+            //     0x2007 => self.registers.data = pins.regD,
+            //     0x4014 => self.registers.oamdma = pins.regD,
+            // }
+        }
     };
 }

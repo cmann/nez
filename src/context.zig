@@ -6,18 +6,6 @@ const PPU = @import("ppu.zig");
 
 const a = std.testing.allocator;
 
-const MappedRegisters = enum(u8) {
-    PPUCTRL = 0x2000,
-    PPUMASK = 0x2001,
-    PPUSTATUS = 0x2002,
-    OAMADDR = 0x2003,
-    OAMDATA = 0x2004,
-    PPUSCROLL = 0x2005,
-    PPUADDR = 0x2006,
-    PPUDATA = 0x2007,
-    OAMDMA = 0x4014,
-};
-
 const NESContext = struct {
     cpuMemory: []u8 = undefined,
     ppuMemory: []u8 = undefined,
@@ -38,14 +26,12 @@ const NESContext = struct {
     }
 
     pub fn tick(self: *Context, cpuIn: CPU.Pins) CPU.Pins {
-        var cpuOut = cpuIn;
-
-        cpuOut = switch (pins.a) {
+        var cpuOut = switch (pins.a) {
             0x0000...0x1FFF => self.cpuMemoryAccess(cpuIn),
             // 0x4000...0x4017 => self.apuIOStuff(addr),
             // 0x4018...0x401F => self.apuIODisabledStuff(addr),
             // 0x4020...0xFFFF => self.cartridgeAccess(addr),
-            else => cpuOut, // Temporary do nothing
+            else => cpuIn, // Temporary do nothing
         };
 
         cpuOut = self.tickPPU(cpuOut);

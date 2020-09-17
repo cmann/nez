@@ -1,5 +1,5 @@
 const Registers = struct {
-    ctrl: packed struct {
+    ctrl: packed union {
         raw: u8, flags: packed struct {
             nn: u2,
             i: bool,
@@ -9,7 +9,7 @@ const Registers = struct {
             v: bool,
         }
     },
-    mask: packed struct {
+    mask: packed union {
         raw: u8, flags: packed struct {
             g: bool,
             m: bool,
@@ -19,7 +19,7 @@ const Registers = struct {
             bgr: u3,
         }
     },
-    status: packed struct {
+    status: packed union {
         raw: u8, flags: packed struct {
             padding: u5,
             o: bool,

@@ -46,48 +46,45 @@ const Pins = struct {
     wr: bool,
 };
 
-pub fn PPU(comptime T: type) type {
-    return struct {
-        registers: Registers,
-        pins: Pins,
-        oam: []u8,
-        cycle: u32,
-        context: *T,
+const PPU = struct {
+    registers: Registers,
+    pins: Pins,
+    oam: []u8,
+    cycle: u32,
 
-        pub fn init(context: *T) PPU(T) {
-            return PPU(T){
-                .context = context,
+    pub fn init(context: *T) PPU(T) {
+        return PPU(T){
+            .context = context,
+        };
+    }
+
+    fn tick(self: *PPU(T), in: Pins) Pins {
+        var out = in;
+
+        if (pins.rw) {
+            out.regD = switch (pins.regA) {
+                0x2000 => self.registers.ctrl,
+                0x2001 => self.registers.mask,
+                0x2002 => self.registers.status,
+                0x2003 => self.registers.oamaddr,
+                0x2004 => self.registers.oamdata,
+                0x2005 => self.registers.scroll,
+                0x2006 => self.registers.addr,
+                0x2007 => self.registers.data,
+                0x4014 => self.registers.oamdma,
+            };
+        } else {
+            _ = switch (pins.regA) {
+                0x2000 => self.registers.ctrl = in.regD,
+                0x2001 => self.registers.mask = in.regD,
+                0x2002 => self.registers.status = in.regD,
+                0x2003 => self.registers.oamaddr = in.regD,
+                0x2004 => self.registers.oamdata = in.regD,
+                0x2005 => self.registers.scroll = in.regD,
+                0x2006 => self.registers.addr = in.regD,
+                0x2007 => self.registers.data = in.regD,
+                0x4014 => self.registers.oamdma = in.regD,
             };
         }
-
-        fn tick(self: *PPU(T), in: Pins) Pins {
-            var out = in;
-
-            if (pins.rw) {
-                out.regD = switch (pins.regA) {
-                    0x2000 => self.registers.ctrl,
-                    0x2001 => self.registers.mask,
-                    0x2002 => self.registers.status,
-                    0x2003 => self.registers.oamaddr,
-                    0x2004 => self.registers.oamdata,
-                    0x2005 => self.registers.scroll,
-                    0x2006 => self.registers.addr,
-                    0x2007 => self.registers.data,
-                    0x4014 => self.registers.oamdma,
-                };
-            } else {
-                _ = switch (pins.regA) {
-                    0x2000 => self.registers.ctrl = in.regD,
-                    0x2001 => self.registers.mask = in.regD,
-                    0x2002 => self.registers.status = in.regD,
-                    0x2003 => self.registers.oamaddr = in.regD,
-                    0x2004 => self.registers.oamdata = in.regD,
-                    0x2005 => self.registers.scroll = in.regD,
-                    0x2006 => self.registers.addr = in.regD,
-                    0x2007 => self.registers.data = in.regD,
-                    0x4014 => self.registers.oamdma = in.regD,
-                };
-            }
-        }
-    };
-}
+    }
+};

@@ -2,6 +2,8 @@ const std = @import("std");
 const fs = std.fs;
 const mem = std.mem;
 
+const NES = @import("nes.zig").NES;
+
 const LoadError = error{ UnsupportedMapper, UnsupportedFormat, InvalidFormat };
 
 const Flags = struct {
@@ -51,4 +53,7 @@ pub fn main() !void {
     var foo = "asdfasdf";
     var memory: [0x10000]u8 = undefined;
     try load(foo, &memory);
+    var a = std.heap.c_allocator;
+    var nes = try NES.init(a);
+    defer nes.deinit();
 }

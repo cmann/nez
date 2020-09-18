@@ -1,3 +1,6 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
 const Registers = struct {
     ctrl: packed union {
         raw: u8, flags: packed struct {
@@ -35,7 +38,7 @@ const Registers = struct {
     oamdma: u8,
 };
 
-const Pins = struct {
+pub const Pins = struct {
     regD: u8,
     regA: u4,
     a: u14,
@@ -46,26 +49,43 @@ const Pins = struct {
     wr: bool,
 };
 
-const PPU = struct {
+const Sprite = struct {
+    y: u4,
+    tile: u4,
+    attribute: u4,
+    x: u4,
+};
+
+pub const PPU = struct {
     registers: Registers,
     pins: Pins,
-    oam: []u8,
+    primaryOAM: []Sprite,
+    secondaryOAM: []Sprite,
     cycle: u32,
 
-    pub fn init(context: *T) PPU(T) {
-        return PPU(T){
-            .context = context,
+    a: *Allocator,
+
+    pub fn init(a: *Allocator) !PPU {
+        return PPU{
+            .primaryOAM = try a.alloc(Sprite, 64),
+            .secondaryOAM = try a.alloc(Sprite, 8),
+            .a = a,
         };
     }
 
-    fn tick(self: *PPU(T), in: Pins) Pins {
+    pub fn deinit(self: *PPU) void {
+        self.a.free(self.primaryOAM);
+        self.a.free(self.secondaryOAM);
+    }
+
+    fn tick(self: *PPU, in: Pins) Pins {
         var out = in;
 
         if (pins.rw) {
             out.regD = switch (pins.regA) {
-                0x2000 => self.registers.ctrl,
-                0x2001 => self.registers.mask,
-                0x2002 => self.registers.status,
+                0x2000 => self.registers.ctrl.raw,
+                0x2001 => self.registers.mask.raw,
+                0x2002 => self.registers.status.raw,
                 0x2003 => self.registers.oamaddr,
                 0x2004 => self.registers.oamdata,
                 0x2005 => self.registers.scroll,
@@ -75,9 +95,9 @@ const PPU = struct {
             };
         } else {
             _ = switch (pins.regA) {
-                0x2000 => self.registers.ctrl = in.regD,
-                0x2001 => self.registers.mask = in.regD,
-                0x2002 => self.registers.status = in.regD,
+                0x2000 => self.registers.ctrl = in.regD.raw,
+                0x2001 => self.registers.mask = in.regD.raw,
+                0x2002 => self.registers.status = in.regD.raw,
                 0x2003 => self.registers.oamaddr = in.regD,
                 0x2004 => self.registers.oamdata = in.regD,
                 0x2005 => self.registers.scroll = in.regD,
@@ -86,5 +106,15 @@ const PPU = struct {
                 0x4014 => self.registers.oamdma = in.regD,
             };
         }
+    }
+
+    fn renderScanline(self: *PPU) void {
+        _ = switch (cycle) {
+            0 => {},
+            1...256 => {},
+            257...320 => {},
+            321...336 => {},
+            337...340 => {},
+        };
     }
 };

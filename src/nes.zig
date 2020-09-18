@@ -1,28 +1,33 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const warn = std.debug.warn;
 
 const CPU = @import("cpu.zig");
 const PPU = @import("ppu.zig");
 
-const a = std.testing.allocator;
-
-const NESContext = struct {
-    cpuMemory: []u8 = undefined,
-    ppuMemory: []u8 = undefined,
+pub const NES = struct {
+    cpu: CPU.CPU(NES),
+    cpuMemory: []u8,
 
     ppu: PPU.PPU,
     ppuPins: PPU.Pins,
+    ppuMemory: []u8,
 
-    pub fn init() Context {
-        return Context{
-            .cpuMemory = a.alloc(u8, 0x0800),
-            .ppuMemory = a.alloc(u8, 0x4000),
+    a: *Allocator,
+
+    pub fn init(a: *Allocator) !NES {
+        return NES{
+            .cpuMemory = try a.alloc(u8, 0x0800),
+            .ppuMemory = try a.alloc(u8, 0x4000),
+            .ppu = try PPU.PPU.init(a),
+            .a = a,
         };
     }
 
     pub fn deinit(self: *Context) void {
-        a.free(self.cpuMemory);
-        a.free(self.ppuMemory);
+        self.a.free(self.cpuMemory);
+        self.a.free(self.ppuMemory);
+        self.ppu.deinit();
     }
 
     pub fn tick(self: *Context, cpuIn: CPU.Pins) CPU.Pins {

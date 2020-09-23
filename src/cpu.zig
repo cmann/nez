@@ -165,26 +165,26 @@ pub fn CPU(comptime T: type) type {
             }
         }
 
-        fn implied(self: *CPU(T), instruction: impliedInstruction) void {
+        fn implied(self: *CPU(T), comptime instruction: impliedInstruction) void {
             instruction(self);
 
             self.prefetch();
         }
 
-        fn accumulator(self: *CPU(T), instruction: readWriteInstruction) void {
+        fn accumulator(self: *CPU(T), comptime instruction: readWriteInstruction) void {
             self.registers.a = instruction(self, self.registers.a);
 
             self.prefetch();
         }
 
-        fn immediate(self: *CPU(T), instruction: readInstruction) void {
+        fn immediate(self: *CPU(T), comptime instruction: readInstruction) void {
             const value = self.fetch();
             instruction(self, value);
 
             self.prefetch();
         }
 
-        fn absolute(self: *CPU(T), instruction: Instruction) void {
+        fn absolute(self: *CPU(T), comptime instruction: Instruction) void {
             const lo = self.fetch();
             self.tick();
 
@@ -196,7 +196,7 @@ pub fn CPU(comptime T: type) type {
             self.prefetch();
         }
 
-        fn absoluteIndexed(self: *CPU(T), instruction: Instruction, index: u8) void {
+        fn absoluteIndexed(self: *CPU(T), comptime instruction: Instruction, index: u8) void {
             const lo = self.fetch();
             self.tick();
 
@@ -210,22 +210,22 @@ pub fn CPU(comptime T: type) type {
             self.prefetch();
         }
 
-        fn absoluteX(self: *CPU(T), instruction: Instruction) void {
+        fn absoluteX(self: *CPU(T), comptime instruction: Instruction) void {
             self.absoluteIndexed(instruction, self.registers.x);
         }
 
-        fn absoluteY(self: *CPU(T), instruction: Instruction) void {
+        fn absoluteY(self: *CPU(T), comptime instruction: Instruction) void {
             self.absoluteIndexed(instruction, self.registers.y);
         }
 
-        fn zeroPage(self: *CPU(T), instruction: Instruction) void {
+        fn zeroPage(self: *CPU(T), comptime instruction: Instruction) void {
             self.pins.a = self.fetch();
             self.exec(instruction);
 
             self.prefetch();
         }
 
-        fn zeroPageIndexed(self: *CPU(T), instruction: Instruction, index: u8) void {
+        fn zeroPageIndexed(self: *CPU(T), comptime instruction: Instruction, index: u8) void {
             const lo = self.fetch();
             self.pins.a = lo;
             self.tick();
@@ -236,15 +236,15 @@ pub fn CPU(comptime T: type) type {
             self.prefetch();
         }
 
-        fn zeroPageX(self: *CPU(T), instruction: Instruction) void {
+        fn zeroPageX(self: *CPU(T), comptime instruction: Instruction) void {
             self.zeroPageIndexed(instruction, self.registers.x);
         }
 
-        fn zeroPageY(self: *CPU(T), instruction: Instruction) void {
+        fn zeroPageY(self: *CPU(T), comptime instruction: Instruction) void {
             self.zeroPageIndexed(instruction, self.registers.y);
         }
 
-        fn indexedIndirect(self: *CPU(T), instruction: Instruction) void {
+        fn indexedIndirect(self: *CPU(T), comptime instruction: Instruction) void {
             self.pins.a = self.fetch();
             self.tick();
 
@@ -263,7 +263,7 @@ pub fn CPU(comptime T: type) type {
             self.prefetch();
         }
 
-        fn indirectIndexed(self: *CPU(T), instruction: Instruction) void {
+        fn indirectIndexed(self: *CPU(T), comptime instruction: Instruction) void {
             self.pins.a = self.fetch();
             self.tick();
 
@@ -282,7 +282,7 @@ pub fn CPU(comptime T: type) type {
             self.prefetch();
         }
 
-        fn exec(self: *CPU(T), instruction: Instruction) void {
+        fn exec(self: *CPU(T), comptime instruction: Instruction) void {
             switch (instruction) {
                 .R => |r| {
                     self.tick();

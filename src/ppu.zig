@@ -85,19 +85,14 @@ pub const PPU = struct {
             out.regD = switch (pins.regA) {
                 0x2001 => self.registers.mask.raw,
                 0x2002 => self.registers.status.raw,
-                0x2003 => self.registers.oamAddr,
                 0x2004 => self.primaryOAM[self.registers.oamAddr],
-                0x2005 => self.registers.scroll,
-                0x2006 => self.registers.addr,
                 0x2007 => self.registers.data,
-                0x4014 => self.registers.oamdma,
                 else => unreachable,
             };
         } else {
             _ = switch (pins.regA) {
-                0x2000 => self.registers.ctrl = in.regD.raw,
-                0x2001 => self.registers.mask = in.regD.raw,
-                0x2002 => self.registers.status = in.regD.raw,
+                0x2000 => self.registers.ctrl.raw = in.regD,
+                0x2001 => self.registers.mask.raw = in.regD,
                 0x2003 => self.registers.oamAddr = in.regD,
                 0x2004 => {
                     self.primaryOAM[self.registers.oamAddr];

@@ -95,15 +95,15 @@ pub fn CPU(comptime T: type) type {
             self.tick();
         }
 
-        fn handleInterrupts(self: *CPU(T), doBrk: bool) void {
-            if (!self.nmiDetected and !self.irqDetected and !doBrk) {
+        fn handleInterrupts(self: *CPU(T), brk: bool) void {
+            if (!self.nmiDetected and !self.irqDetected and !brk) {
                 return;
             }
 
             self.irqDetected = false;
 
             // PC increment is suppressed for NMI/IRQ
-            if (doBrk) {
+            if (brk) {
                 self.registers.pc += 1;
                 self.pins.a = self.registers.pc;
             }
@@ -119,7 +119,7 @@ pub fn CPU(comptime T: type) type {
 
             var p = self.registers.p;
             p.flags.u = true;
-            p.flags.b = if (doBrk) true else false;
+            p.flags.b = brk;
             self.push(p.raw);
 
             self.registers.p.flags.i = true;
